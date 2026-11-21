@@ -1,23 +1,20 @@
 /**
  * Builds one loop iteration from a source buffer and a bar-aligned region
- * [start, end]. Three seam treatments:
+ * [start, end].
  *
- *  - "keep" (post-roll): keep the loop length. Audio *after* end (end .. end+fade)
- *    is blended over the head, fading out while the head fades in. Needs
- *    post-roll material beyond the loop end.
+ *  - left marker: incoming fade-in over [start - inPre, start + inPost], 0 -> 1
+ *  - right marker: outgoing fade-out over [end - outPre, end + outPost], 1 -> 0
  *
- *  - "lead" (pre-roll): keep the loop length. The loop's own tail
- *    (end-fade .. end) is blended into the audio *before* the start
- *    (start-fade .. start), so the lead-in happens before marker 1 and the head
- *    marker plays at full level. Needs pre-roll material before the loop start.
+ * The period is the region itself: the post-roll after the end overlays the
+ * head at the start, and the pre-roll before the start overlays the loop tail
+ * at the end. The crossfade window is the union of the two windows around the
+ * seam; the body is the region trimmed by max(inPre, outPre) at the tail and
+ * max(inPost, outPost) at the head. A zero-length window is a hard edge. The
+ * author owns the gain sum and any seam click; `wrapStep` reports it.
  *
- *  - "shorten": legacy symmetric crossfade using the loop's own tail and head;
- *    the loop gets shorter by the fade length.
- *
- * Keeping the length means borrowing audio from outside the region: post-roll
- * for "keep", pre-roll for "lead". Curves: "equal-power" (sin/cos) or "linear".
+ * Curves: "equal-power" (sin/cos) or "linear".
  */
-export function bakeLoop(ctx, source, { start, end, fade = 0.1, mode = 'keep', curve = 'equal-power' }) {
+export function bakeLoop(ctx, source, { start, end, inPre = 0, inPost = 0, outPre = 0, outPost = 0, curve = 'equal-power' }) {
   const sr = source.sampleRate
   const nch = source.numberOfChannels
   const S = Math.max(0, Math.round(start * sr))
@@ -25,72 +22,88 @@ export function bakeLoop(ctx, source, { start, end, fade = 0.1, mode = 'keep', c
   const L = E - S
   if (L <= 0) throw new Error('loop region is empty')
 
-  const requestedSamples = Math.max(0, Math.min(Math.round(fade * sr), L))
-  const tailAvailableSamples = Math.max(0, source.length - E)
-  const preAvailableSamples = S
-  const modeMap = { keep: 'keep', lead: 'lead', preroll: 'lead', shorten: 'shorten', tail: 'keep', crossfade: 'shorten' }
-  const eff = modeMap[mode] ?? 'keep'
+  const inGain = (t) => (curve === 'equal-power' ? Math.sin((t * Math.PI) / 2) : t)
+  const outGain = (t) => (curve === 'equal-power' ? Math.cos((t * Math.PI) / 2) : 1 - t)
 
-  let X = requestedSamples
-  let tailClipped = false
-  let preClipped = false
-  let fadeClipped = false
-  if (eff === 'keep') {
-    if (X > tailAvailableSamples) { X = tailAvailableSamples; tailClipped = true }
-  } else if (eff === 'lead') {
-    if (X > preAvailableSamples) { X = preAvailableSamples; preClipped = true }
-    X = Math.min(X, L)
-  } else {
-    const cap = Math.floor(L / 2)
-    if (X > cap) { X = cap; fadeClipped = true }
+  // requested window lengths, then what the source and the region can give
+  const reqInPre = Math.max(0, Math.round(inPre * sr))
+  const reqInPost = Math.max(0, Math.round(inPost * sr))
+  const reqOutPre = Math.max(0, Math.round(outPre * sr))
+  const reqOutPost = Math.max(0, Math.round(outPost * sr))
+  const preAvailable = S
+  const postAvailable = Math.max(0, source.length - E)
+  const inPreEff = Math.min(reqInPre, preAvailable)
+  const inPostEff = Math.min(reqInPost, L)
+  const outPreEff = Math.min(reqOutPre, L)
+  const outPostEff = Math.min(reqOutPost, postAvailable)
+  const inPreClipped = reqInPre > preAvailable
+  const outPostClipped = reqOutPost > postAvailable
+  const fadeInClipped = reqInPost > L
+  const fadeOutClipped = reqOutPre > L
+  let maxPre = Math.max(inPreEff, outPreEff)
+  let maxPost = Math.max(inPostEff, outPostEff)
+  let windowClipped = false
+  if (maxPre + maxPost > L) {
+    const scale = L / (maxPre + maxPost)
+    maxPre = Math.floor(maxPre * scale)
+    maxPost = L - maxPre
+    windowClipped = true
   }
-
-  const outLen = eff === 'shorten' ? L - X : L
-  const out = ctx.createBuffer(nch, Math.max(1, outLen), sr)
-  const fadeIn = (t) => (curve === 'equal-power' ? Math.sin((t * Math.PI) / 2) : t)
-  const fadeOut = (t) => (curve === 'equal-power' ? Math.cos((t * Math.PI) / 2) : 1 - t)
-
+  const bodyEnd = L - maxPre
+  const out = ctx.createBuffer(nch, L, sr)
+  const inGainAt = (u) => {
+    if (inPreEff + inPostEff === 0) return u < 0 ? 0 : 1
+    if (u <= -inPreEff) return 0
+    if (u >= inPostEff) return 1
+    return inGain((u + inPreEff) / (inPreEff + inPostEff))
+  }
+  const outGainAt = (u) => {
+    if (outPreEff + outPostEff === 0) return u < 0 ? 1 : 0
+    if (u <= -outPreEff) return 1
+    if (u >= outPostEff) return 0
+    return outGain((u + outPreEff) / (outPreEff + outPostEff))
+  }
   for (let ch = 0; ch < nch; ch++) {
     const src = source.getChannelData(ch)
     const dst = out.getChannelData(ch)
-
-    if (eff === 'lead') {
-      // body plays unchanged; the last fade is a crossfade from the loop's
-      // own tail into the pre-roll, ending exactly on the start marker
-      for (let i = 0; i < outLen; i++) dst[i] = src[S + i]
-      if (X > 0) {
-        for (let i = L - X; i < L; i++) {
-          const t = (i - (L - X)) / X
-          dst[i] = src[S + i] * fadeOut(t) + src[S + i - L] * fadeIn(t)
-        }
-      }
-      continue
+    // after the wrap: incoming head (hard unless inPost) + outgoing post-roll
+    for (let i = 0; i < maxPost; i++) {
+      let v = src[S + i] * inGainAt(i)
+      if (i < outPostEff) v += src[E + i] * outGainAt(i)
+      dst[i] = v
     }
-
-    // keep / shorten: crossfade at the head (S .. S+X)
-    if (X > 0) {
-      for (let i = 0; i < X; i++) {
-        const t = i / X
-        const head = src[S + i]
-        const other = eff === 'keep' ? src[E + i] : src[E - X + i]
-        dst[i] = head * fadeIn(t) + other * fadeOut(t)
-      }
+    // the untouched middle of the region
+    for (let i = maxPost; i < bodyEnd; i++) dst[i] = src[S + i]
+    // before the wrap: outgoing loop tail + incoming pre-roll
+    for (let i = bodyEnd; i < L; i++) {
+      const u = i - L
+      let v = src[E + u] * outGainAt(u)
+      if (u >= -inPreEff) v += src[S + u] * inGainAt(u)
+      dst[i] = v
     }
-    for (let i = X; i < outLen; i++) dst[i] = src[S + i]
   }
-
+  let wrapStep = 0
+  for (let ch = 0; ch < nch; ch++) {
+    const d = out.getChannelData(ch)
+    wrapStep = Math.max(wrapStep, Math.abs(d[0] - d[L - 1]))
+  }
   return {
     buffer: out,
-    mode: eff,
-    fadeSeconds: X / sr,
-    requestedFadeSeconds: requestedSamples / sr,
-    tailAvailableSeconds: tailAvailableSamples / sr,
-    preAvailableSeconds: preAvailableSamples / sr,
-    tailClipped,
-    preClipped,
-    fadeClipped,
-    loopLength: outLen / sr,
-    sourceStart: S / sr,
-    sourceEnd: E / sr,
+    inPreSeconds: inPreEff / sr,
+    inPostSeconds: inPostEff / sr,
+    outPreSeconds: outPreEff / sr,
+    outPostSeconds: outPostEff / sr,
+    windowPreSeconds: maxPre / sr,
+    windowPostSeconds: maxPost / sr,
+    windowSeconds: (maxPre + maxPost) / sr,
+    bodySeconds: (L - maxPre - maxPost) / sr,
+    periodSeconds: L / sr,
+    loopLength: L / sr,
+    inPreClipped,
+    outPostClipped,
+    fadeInClipped,
+    fadeOutClipped,
+    windowClipped,
+    wrapStep,
   }
 }

@@ -4,24 +4,25 @@ import { WaveformView } from './waveform.js'
 import { bakeLoop } from './loopbake.js'
 import { computePeaks } from './peaks.js'
 import { createFileDrop } from './file-drop.js'
+import { buildPreset, PRESET_FORMAT } from './preset.js'
 
 const $ = (id) => document.getElementById(id)
 const el = {
   meta: $('meta'), timeline: $('timeline'), wave: $('wave'),
   playhead: $('playhead'), loading: $('loading'), play: $('play'), restart: $('restart'),
   loop: $('loop'), time: $('time'), duration: $('duration'), barpos: $('barpos'), status: $('status'),
-  loopIn: $('loopIn'), loopOut: $('loopOut'), fade: $('fade'), fadeVal: $('fadeVal'),
-  mode: $('mode'), curve: $('curve'), loopInfo: $('loopInfo'),
+  loopIn: $('loopIn'), loopOut: $('loopOut'),
+  inPre: $('inPre'), inPreVal: $('inPreVal'), inPost: $('inPost'), inPostVal: $('inPostVal'),
+  outPre: $('outPre'), outPreVal: $('outPreVal'), outPost: $('outPost'), outPostVal: $('outPostVal'),
+  curve: $('curve'), loopInfo: $('loopInfo'),
   bpm: $('bpm'), barLenInfo: $('barLenInfo'), fitLoop: $('fitLoop'),
   gridMs: $('gridMs'), gridVal: $('gridVal'), gM2: $('gM2'), gM1: $('gM1'), gP1: $('gP1'), gP2: $('gP2'), g0: $('g0'),
   mini: $('minimap'), zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomFit: $('zoomFit'), zoomInfo: $('zoomInfo'),
   loadAudio: $('loadAudio'), audioFile: $('audioFile'),
-  copySetup: $('copySetup'), loadSetup: $('loadSetup'),
-  setupDialog: $('setupDialog'), setupText: $('setupText'), setupError: $('setupError'),
-  cancelSetup: $('cancelSetup'), applySetup: $('applySetup'),
+  copyPreset: $('copyPreset'), loadPreset: $('loadPreset'),
+  presetDialog: $('presetDialog'), presetText: $('presetText'), presetError: $('presetError'),
+  cancelPreset: $('cancelPreset'), applyPreset: $('applyPreset'),
 }
-
-const SETUP_FORMAT = 'web-loop/setup'
 
 const engine = new AudioEngine()
 const view = new WaveformView(el.wave, el.playhead, el.timeline, el.mini)
@@ -34,7 +35,7 @@ let scrubbing = false
 let resumeAfter = false
 let drag = null
 let lastDrawn = -1
-let fadeTimer = 0
+let envelopeTimer = 0
 let gridMs = 0
 let bpm = 120
 let miniDrag = false
@@ -44,7 +45,7 @@ const saveGrid = () => {
   try { localStorage.setItem(GRID_KEY, String(gridMs)) } catch {}
 }
 
-const loop = { enabled: false, start: 0, end: 0, fadeMs: 120, mode: 'keep', curve: 'equal-power' }
+const loop = { enabled: false, start: 0, end: 0, inPreMs: 0, inPostMs: 0, outPreMs: 0, outPostMs: 120, curve: 'equal-power' }
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
 
 const fmt = (t) => {
@@ -77,12 +78,29 @@ function syncGridUi() {
   el.gridVal.textContent = `${Math.round(gridMs)} ms`
 }
 
+/** Keep the four edge sliders in step with the loop state. */
+function syncEnvelopeUi() {
+  el.inPre.value = String(loop.inPreMs)
+  el.inPreVal.textContent = `${loop.inPreMs} ms`
+  el.inPost.value = String(loop.inPostMs)
+  el.inPostVal.textContent = `${loop.inPostMs} ms`
+  el.outPre.value = String(loop.outPreMs)
+  el.outPreVal.textContent = `${loop.outPreMs} ms`
+  el.outPost.value = String(loop.outPostMs)
+  el.outPostVal.textContent = `${loop.outPostMs} ms`
+}
+
 function renderControls() {
   el.play.textContent = engine.playing ? '❚❚ Pause' : '▶ Play'
 }
 
+/** The baked period starts on the in-marker; pre/post are overlaid inside it. */
+function loopOrigin() {
+  return loop.start
+}
+
 function currentSourceTime() {
-  if (loopBuffer && engine.buffer === loopBuffer) return loop.start + engine.position()
+  if (loopBuffer && engine.buffer === loopBuffer) return loopOrigin() + engine.position()
   return engine.position()
 }
 
@@ -93,58 +111,64 @@ function updateReadout(t) {
 }
 
 function updateLoopInfo() {
-  el.fadeVal.textContent = `${loop.fadeMs} ms`
   el.loopIn.textContent = `in ${labelFor(loop.start)}`
   el.loopOut.textContent = `out ${labelFor(loop.end)}`
   if (!baked || !sourceBuffer) { el.loopInfo.textContent = ''; return }
   const bars = baked.loopLength / barLenNow()
-  const fade = (baked.fadeSeconds * 1000).toFixed(0)
-  const ms = (baked.loopLength * 1000).toFixed(1)
-  const smp = Math.round(baked.loopLength * (sourceBuffer?.sampleRate ?? 48000))
-  const region = loop.end - loop.start
-  const short = Math.abs(baked.loopLength - region) > 0.0005 ? ` · region ${(region * 1000).toFixed(0)} ms` : ''
-  const modeLabel = baked.mode === 'keep' ? 'post-roll' : baked.mode === 'lead' ? 'lead-in' : 'shorten'
-  let text = `${modeLabel} · ${bars.toFixed(3)} bars · ${ms} ms · ${smp} smp · fade ${fade} ms${short}`
-  let warn = baked.fadeSeconds > baked.loopLength * 0.08
-  const req = (baked.requestedFadeSeconds * 1000).toFixed(0)
-  if (baked.mode === 'keep' && baked.tailClipped) {
-    warn = true
-    if (baked.tailAvailableSeconds <= 0.00001) text += ` · ⚠ no audio after loop end (requested ${req} ms)`
-    else text += ` · ⚠ tail limited to ${(baked.tailAvailableSeconds * 1000).toFixed(0)} of ${req} ms requested`
-  }
-  if (baked.mode === 'lead' && baked.preClipped) {
-    warn = true
-    if (baked.preAvailableSeconds <= 0.00001) text += ` · ⚠ no audio before loop start (requested ${req} ms)`
-    else text += ` · ⚠ lead-in limited to ${(baked.preAvailableSeconds * 1000).toFixed(0)} of ${req} ms (pre-roll ends)`
-  }
-  if (baked.fadeClipped) text += ` · ⚠ fade capped at half the loop`
-  if (baked.mode === 'keep' && !baked.tailClipped && baked.tailAvailableSeconds > 0) text += ` · post-roll ${baked.tailAvailableSeconds.toFixed(2)} s`
-  if (baked.mode === 'lead' && !baked.preClipped && baked.preAvailableSeconds > 0) text += ` · pre-roll ${baked.preAvailableSeconds.toFixed(2)} s`
+  const periodMs = (baked.periodSeconds * 1000).toFixed(0)
+  const windowMs = (baked.windowSeconds * 1000).toFixed(0)
+  const bodyMs = (baked.bodySeconds * 1000).toFixed(0)
+  const inPre = (baked.inPreSeconds * 1000).toFixed(0)
+  const inPost = (baked.inPostSeconds * 1000).toFixed(0)
+  const outPre = (baked.outPreSeconds * 1000).toFixed(0)
+  const outPost = (baked.outPostSeconds * 1000).toFixed(0)
+  const seamDb = baked.wrapStep > 1e-9 ? (20 * Math.log10(baked.wrapStep)).toFixed(1) : '−∞'
+  let text = `period ${periodMs} ms · ${bars.toFixed(3)} bars · window ${windowMs} ms · body ${bodyMs} ms · in ${inPre}+${inPost} ms · out ${outPre}+${outPost} ms · seam ${seamDb} dBFS`
+  let warn = false
+  if (baked.inPreClipped) { warn = true; text += ` · ⚠ in pre limited to ${inPre} ms` }
+  if (baked.outPostClipped) { warn = true; text += ` · ⚠ out post limited to ${outPost} ms` }
+  if (baked.fadeInClipped) { warn = true; text += ' · ⚠ fade-in window clipped' }
+  if (baked.fadeOutClipped) { warn = true; text += ' · ⚠ fade-out window clipped' }
+  if (baked.windowClipped) { warn = true; text += ' · ⚠ windows exceed the loop' }
+  if (baked.wrapStep > 0.05) { warn = true; text += ' · ⚠ seam step is audible' }
   el.loopInfo.textContent = text
   el.loopInfo.classList.toggle('warn', warn)
 }
 
 /** Every source position that is audible right now. */
+function edgeInGain(u) {
+  const pre = baked.inPreSeconds, post = baked.inPostSeconds
+  if (pre + post <= 0) return u < 0 ? 0 : 1
+  if (u <= -pre) return 0
+  if (u >= post) return 1
+  const t = (u + pre) / (pre + post)
+  return loop.curve === 'equal-power' ? Math.sin((t * Math.PI) / 2) : t
+}
+
+function edgeOutGain(u) {
+  const pre = baked.outPreSeconds, post = baked.outPostSeconds
+  if (pre + post <= 0) return u < 0 ? 1 : 0
+  if (u <= -pre) return 1
+  if (u >= post) return 0
+  const t = (u + pre) / (pre + post)
+  return loop.curve === 'equal-power' ? Math.cos((t * Math.PI) / 2) : 1 - t
+}
+
 function computeHeads(t = currentSourceTime()) {
   const heads = [{ t, kind: 'main' }]
-  if (loop.enabled && baked && loopBuffer && engine.buffer === loopBuffer && baked.fadeSeconds > 1e-4) {
-    const p = engine.position()
-    const fade = baked.fadeSeconds
-    if (baked.mode === 'keep' || baked.mode === 'shorten') {
-      if (p < fade) {
-        const otherT = baked.mode === 'keep' ? loop.end + p : loop.end - fade + p
-        const u = p / fade
-        const gain = loop.curve === 'equal-power' ? Math.cos((u * Math.PI) / 2) : 1 - u
-        if (otherT >= 0 && track && otherT <= track.duration) heads.push({ t: otherT, kind: 'tail', gain, label: 'tail' })
-      }
-    } else if (baked.mode === 'lead') {
-      const L = baked.loopLength
-      if (p >= L - fade) {
-        const u = (p - (L - fade)) / fade
-        const gain = loop.curve === 'equal-power' ? Math.sin((u * Math.PI) / 2) : u
-        const leadT = loop.start + p - L
-        if (leadT >= 0 && track && leadT <= track.duration) heads.push({ t: leadT, kind: 'tail', gain, label: 'lead' })
-      }
+  if (!(loop.enabled && baked && loopBuffer && engine.buffer === loopBuffer)) return heads
+  const p = engine.position()
+  const L = baked.loopLength
+  if (p < baked.windowPostSeconds) {
+    // post-roll is still sounding under the restarted head
+    if (p < baked.outPostSeconds) {
+      heads.push({ t: loop.end + p, kind: 'tail', gain: edgeOutGain(p), label: 'tail' })
+    }
+  } else if (p >= L - baked.windowPreSeconds) {
+    // pre-roll has already started under the loop tail
+    const u = p - L
+    if (u >= -baked.inPreSeconds) {
+      heads.push({ t: loop.start + u, kind: 'tail', gain: edgeInGain(u), label: 'lead' })
     }
   }
   return heads
@@ -154,10 +178,14 @@ function redraw(t = currentSourceTime()) {
   const loopView = loop.enabled
     ? {
         ...loop,
-        fade: baked?.fadeSeconds ?? loop.fadeMs / 1000,
+        inPre: baked?.inPreSeconds ?? loop.inPreMs / 1000,
+        inPost: baked?.inPostSeconds ?? loop.inPostMs / 1000,
+        outPre: baked?.outPreSeconds ?? loop.outPreMs / 1000,
+        outPost: baked?.outPostSeconds ?? loop.outPostMs / 1000,
         effectiveEnd: loop.start + (baked?.loopLength ?? loop.end - loop.start),
       }
     : null
+  view.setLoopEnvelope(loopView)
   view.drawOverlay({ position: t, loop: loopView, heads: computeHeads(t) })
   view.drawMinimap(loopView, t)
   updateReadout(t)
@@ -185,7 +213,9 @@ function bakeNow() {
   if (!sourceBuffer || !engine.ctx) return
   baked = bakeLoop(engine.ctx, sourceBuffer, {
     start: loop.start, end: loop.end,
-    fade: loop.fadeMs / 1000, mode: loop.mode, curve: loop.curve,
+    inPre: loop.inPreMs / 1000, inPost: loop.inPostMs / 1000,
+    outPre: loop.outPreMs / 1000, outPost: loop.outPostMs / 1000,
+    curve: loop.curve,
   })
   loopBuffer = baked.buffer
   updateLoopInfo()
@@ -194,7 +224,7 @@ function bakeNow() {
 function applyLoopBuffer(srcTime, wasPlaying) {
   engine.setBuffer(loopBuffer)
   engine.setLoop(true)
-  const pos = clamp(srcTime - loop.start, 0, Math.max(0, baked.loopLength - 0.0005))
+  const pos = clamp(srcTime - loopOrigin(), 0, Math.max(0, baked.loopLength - 0.0005))
   engine.seek(pos)
   if (wasPlaying) engine.play(pos)
 }
@@ -313,9 +343,9 @@ function fitLoopToAudio() {
   setStatus(`fitted ${bpm.toFixed(2)} BPM · ${nBars} bars · ${(loop.end - loop.start).toFixed(3)} s`, 'ok')
 }
 
-function setSetupEnabled(on) {
-  el.copySetup.disabled = !on
-  el.loadSetup.disabled = !on
+function setPresetEnabled(on) {
+  el.copyPreset.disabled = !on
+  el.loadPreset.disabled = !on
 }
 
 function updateMeta() {
@@ -350,8 +380,10 @@ async function loadAudioFile(file) {
     bpm = clamp(Number(localStorage.getItem(BPM_KEY)) || 120, 40, 240)
     gridMs = Number(localStorage.getItem(GRID_KEY)) || 0
     loop.enabled = false
-    loop.fadeMs = 120
-    loop.mode = 'keep'
+    loop.inPreMs = 0
+    loop.inPostMs = 0
+    loop.outPreMs = 0
+    loop.outPostMs = 120
     loop.curve = 'equal-power'
     baked = null
     loopBuffer = null
@@ -360,11 +392,9 @@ async function loadAudioFile(file) {
     view.setGrid(gridOriginNow())
     syncTempoUi()
     syncGridUi()
-    el.fade.value = '120'
-    el.fadeVal.textContent = '120 ms'
-    el.mode.value = 'keep'
-    el.curve.value = 'equal-power'
+    el.curve.value = loop.curve
     el.loop.checked = false
+    syncEnvelopeUi()
 
     // Default to whole bars, leaving a little tail after the last one.
     const bar = barLenNow()
@@ -384,7 +414,7 @@ async function loadAudioFile(file) {
     bakeNow()
     el.duration.textContent = fmt(track.duration)
     updateMeta()
-    setSetupEnabled(true)
+    setPresetEnabled(true)
     renderControls()
     redraw(0)
     setLoading(false)
@@ -396,23 +426,8 @@ async function loadAudioFile(file) {
   }
 }
 
-function currentSetup() {
-  if (!track) return null
-  return {
-    format: SETUP_FORMAT,
-    version: 1,
-    track: sourceName || null,
-    bpm: +bpm.toFixed(4),
-    gridOffsetMs: +gridMs.toFixed(2),
-    loop: {
-      enabled: loop.enabled,
-      start: +loop.start.toFixed(6),
-      end: +loop.end.toFixed(6),
-      fadeMs: loop.fadeMs,
-      mode: loop.mode,
-      curve: loop.curve,
-    },
-  }
+function currentPreset() {
+  return buildPreset({ track, sourceName, bpm, gridMs, loop })
 }
 
 function fallbackCopy(text) {
@@ -429,55 +444,54 @@ function fallbackCopy(text) {
   return ok
 }
 
-async function copySetup() {
+async function copyPreset() {
   if (!track) { setStatus('load audio first', 'error'); return }
-  const text = JSON.stringify(currentSetup(), null, 2)
+  const text = JSON.stringify(currentPreset(), null, 2)
   try {
     if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text)
     else if (!fallbackCopy(text)) throw new Error('clipboard unavailable')
-    setStatus('setup copied to clipboard', 'ok')
+    setStatus('preset copied to clipboard', 'ok')
   } catch (err) {
-    if (fallbackCopy(text)) { setStatus('setup copied to clipboard', 'ok'); return }
+    if (fallbackCopy(text)) { setStatus('preset copied to clipboard', 'ok'); return }
     setStatus(`could not copy: ${err.message || err}`, 'error')
   }
 }
 
-function showSetupError(message) {
-  el.setupError.textContent = message
+function showPresetError(message) {
+  el.presetError.textContent = message
 }
 
-function openSetupDialog() {
+function openPresetDialog() {
   if (!track) { setStatus('load audio first', 'error'); return }
-  el.setupError.textContent = ''
-  el.setupText.value = ''
-  el.setupDialog.showModal()
-  el.setupText.focus()
+  el.presetError.textContent = ''
+  el.presetText.value = ''
+  el.presetDialog.showModal()
+  el.presetText.focus()
 }
 
-async function applySetup() {
-  if (!track) { showSetupError('load audio first'); return }
-  const raw = el.setupText.value.trim()
-  if (!raw) { showSetupError('paste a setup JSON first'); return }
+async function applyPreset() {
+  if (!track) { showPresetError('load audio first'); return }
+  const raw = el.presetText.value.trim()
+  if (!raw) { showPresetError('paste a preset JSON first'); return }
   let data
   try {
     data = JSON.parse(raw)
   } catch (err) {
-    showSetupError(`invalid JSON: ${err.message}`)
+    showPresetError(`invalid JSON: ${err.message}`)
     return
   }
-  if (!data || typeof data !== 'object') { showSetupError('the setup must be a JSON object'); return }
-  if (data.format && data.format !== SETUP_FORMAT) {
-    showSetupError(`unexpected format "${data.format}" (expected "${SETUP_FORMAT}")`)
+  if (!data || typeof data !== 'object') { showPresetError('the preset must be a JSON object'); return }
+  if (data.format && data.format !== PRESET_FORMAT) {
+    showPresetError(`unexpected format "${data.format}" (expected "${PRESET_FORMAT}")`)
     return
   }
   const l = data.loop && typeof data.loop === 'object' ? data.loop : {}
   const start = Number(l.start)
   const end = Number(l.end)
-  if (!Number.isFinite(start) || !Number.isFinite(end)) { showSetupError('loop.start and loop.end must be numbers'); return }
-  if (end <= start + 0.001) { showSetupError('loop.end must be after loop.start'); return }
-  const mode = l.mode === 'lead' ? 'lead' : 'keep'
+  if (!Number.isFinite(start) || !Number.isFinite(end)) { showPresetError('loop.start and loop.end must be numbers'); return }
+  if (end <= start + 0.001) { showPresetError('loop.end must be after loop.start'); return }
   const curve = l.curve === 'linear' ? 'linear' : 'equal-power'
-  const fadeMs = clamp(Number(l.fadeMs) || 0, 0, 3000)
+  const edgeMs = (key) => clamp(Number(l[key]) || 0, 0, 3000)
   const nextBpm = Number(data.bpm)
   const nextGrid = Number(data.gridOffsetMs)
 
@@ -488,23 +502,23 @@ async function applySetup() {
     const span = Math.min(minLoop(), max)
     loop.start = clamp(start, 0, Math.max(0, max - span))
     loop.end = clamp(end, loop.start + span, max)
-    loop.fadeMs = fadeMs
-    loop.mode = mode
+    loop.inPreMs = edgeMs('inPreMs')
+    loop.inPostMs = edgeMs('inPostMs')
+    loop.outPreMs = edgeMs('outPreMs')
+    loop.outPostMs = edgeMs('outPostMs')
     loop.curve = curve
-    el.fade.value = String(fadeMs)
-    el.fadeVal.textContent = `${fadeMs} ms`
-    el.mode.value = mode
     el.curve.value = curve
+    syncEnvelopeUi()
     el.loop.checked = !!l.enabled
     baked = null
     loopBuffer = null
     if (l.enabled) setLoopEnabled(true)
     else { rebake(); redraw(loop.start) }
     updateMeta()
-    el.setupDialog.close()
-    setStatus('setup loaded', 'ok')
+    el.presetDialog.close()
+    setStatus('preset loaded', 'ok')
   } catch (err) {
-    showSetupError(String(err.message || err))
+    showPresetError(String(err.message || err))
   }
 }
 
@@ -520,7 +534,7 @@ async function togglePlay() {
 function seekSource(t) {
   const target = clamp(t, 0, track?.duration ?? 0)
   if (loopBuffer && engine.buffer === loopBuffer) {
-    engine.seek(clamp(target - loop.start, 0, Math.max(0, baked.loopLength - 0.0005)))
+    engine.seek(clamp(target - loopOrigin(), 0, Math.max(0, baked.loopLength - 0.0005)))
   } else {
     engine.seek(target)
   }
@@ -683,14 +697,20 @@ el.zoomFit.addEventListener('click', () => { if (track) { view.setWindow(0, trac
 el.play.addEventListener('click', togglePlay)
 el.restart.addEventListener('click', () => seekSource(0))
 el.loop.addEventListener('change', () => setLoopEnabled(el.loop.checked))
-el.mode.addEventListener('change', () => { loop.mode = el.mode.value; rebake() })
 el.curve.addEventListener('change', () => { loop.curve = el.curve.value; rebake() })
-el.fade.addEventListener('input', () => {
-  loop.fadeMs = Number(el.fade.value)
-  el.fadeVal.textContent = `${loop.fadeMs} ms`
-  clearTimeout(fadeTimer)
-  fadeTimer = setTimeout(rebake, 140)
-})
+
+const bindEdge = (key, input, label) => {
+  input.addEventListener('input', () => {
+    loop[key] = Number(input.value)
+    label.textContent = `${loop[key]} ms`
+    clearTimeout(envelopeTimer)
+    envelopeTimer = setTimeout(rebake, 140)
+  })
+}
+bindEdge('inPreMs', el.inPre, el.inPreVal)
+bindEdge('inPostMs', el.inPost, el.inPostVal)
+bindEdge('outPreMs', el.outPre, el.outPreVal)
+bindEdge('outPostMs', el.outPost, el.outPostVal)
 
 const fileDrop = createFileDrop(document, {
   stage: el.timeline,
@@ -699,13 +719,13 @@ const fileDrop = createFileDrop(document, {
 })
 el.loadAudio.addEventListener('click', () => fileDrop.openPicker())
 el.loading.addEventListener('click', () => { if (!track) fileDrop.openPicker() })
-el.copySetup.addEventListener('click', copySetup)
-el.loadSetup.addEventListener('click', openSetupDialog)
-el.cancelSetup.addEventListener('click', () => el.setupDialog.close())
-el.applySetup.addEventListener('click', applySetup)
-el.setupDialog.addEventListener('click', (e) => { if (e.target === el.setupDialog) el.setupDialog.close() })
-el.setupText.addEventListener('keydown', (e) => {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); applySetup() }
+el.copyPreset.addEventListener('click', copyPreset)
+el.loadPreset.addEventListener('click', openPresetDialog)
+el.cancelPreset.addEventListener('click', () => el.presetDialog.close())
+el.applyPreset.addEventListener('click', applyPreset)
+el.presetDialog.addEventListener('click', (e) => { if (e.target === el.presetDialog) el.presetDialog.close() })
+el.presetText.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); applyPreset() }
 })
 
 window.addEventListener('keydown', (e) => {
@@ -753,8 +773,8 @@ function boot() {
     get track() { return sourceName },
     get duration() { return track?.duration ?? 0 },
     get loop() { return { ...loop } },
-    get baked() { return baked && { mode: baked.mode, loopLength: baked.loopLength, fadeSeconds: baked.fadeSeconds, requestedFadeSeconds: baked.requestedFadeSeconds, tailAvailableSeconds: baked.tailAvailableSeconds, tailClipped: baked.tailClipped, preAvailableSeconds: baked.preAvailableSeconds, preClipped: baked.preClipped, fadeClipped: baked.fadeClipped } },
-    get setup() { return currentSetup() },
+    get baked() { return baked && { loopLength: baked.loopLength, periodSeconds: baked.periodSeconds, inPreSeconds: baked.inPreSeconds, inPostSeconds: baked.inPostSeconds, outPreSeconds: baked.outPreSeconds, outPostSeconds: baked.outPostSeconds, windowPreSeconds: baked.windowPreSeconds, windowPostSeconds: baked.windowPostSeconds, windowSeconds: baked.windowSeconds, bodySeconds: baked.bodySeconds, wrapStep: baked.wrapStep, inPreClipped: baked.inPreClipped, outPostClipped: baked.outPostClipped, fadeInClipped: baked.fadeInClipped, fadeOutClipped: baked.fadeOutClipped, windowClipped: baked.windowClipped } },
+    get preset() { return currentPreset() },
     get sourceTime() { return currentSourceTime() },
     get barLen() { return barLenNow() },
     get hasLoopBuffer() { return !!loopBuffer },

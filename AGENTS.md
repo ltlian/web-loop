@@ -3,9 +3,11 @@
 Browser loop workbench: a Vite + vanilla-JS page for finding bar-aligned loop
 points in a track and hearing seam alternatives.
 
-- `src/main.js` — state machine, controls, setup JSON; exposes `window.__workbench`.
+- `src/main.js` — state machine, controls; exposes `window.__workbench`.
+- `src/preset.js` — preset JSON emitter; schema lives in `public/preset.schema.json`.
+- `src/waveform.js` — gradient detail waveform + projected cross-source + overlay.
 - `src/peaks.js` — downmixed min/max buckets for the minimap.
-- `src/loopbake.js` — seam baker; the `keep` and `lead` modes are the product.
+- `src/loopbake.js` — seam baker.
 
 ## Conventions
 
@@ -18,7 +20,3 @@ points in a track and hearing seam alternatives.
 - Worker `web-loop`, asset-only, serves `dist/` at <https://loop.ltlian.com>
   (custom domain in `wrangler.jsonc`). `npm run deploy` builds first through
   `build.command`; pushes to `main` deploy the same way in CI.
-- The build stamps `<meta name="git-commit">` with `git rev-parse --short HEAD`
-  from `vite.config.js`; read it back with
-  `curl -s https://loop.ltlian.com | grep git-commit`.
-

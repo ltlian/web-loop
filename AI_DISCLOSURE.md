@@ -26,7 +26,7 @@ developer before it was committed.
 - **Agent:** [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), running **DeepSeek
   Flash**.
 - **What it wrote:** the application (`src/`, `index.html`), the tests, and the docs,
-  including runtime audio loading, the setup JSON export/import, and the repo scaffolding.
+  including runtime audio loading, the preset JSON export/import, and the repo scaffolding.
 - **What the human did:** chose the design and scope, directed each change, reviewed the diffs,
   verified the UI and the loop envelopes by ear, and approved the commits.
 

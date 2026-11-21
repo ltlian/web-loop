@@ -49,12 +49,13 @@ h1 {
 
 .bar,
 .transport,
-.loopbar,
 .bar-tools,
+.loop-row,
 .loop-toggle,
 .ctl,
 .grid-ctl,
-.setup-ctl,
+.edges,
+.preset-ctl,
 .hint,
 .readout,
 .dialog-actions {
@@ -75,7 +76,7 @@ button,
 select,
 input[type="number"],
 .chip,
-.setup-body textarea {
+.preset-body textarea {
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
@@ -227,12 +228,18 @@ input[type="checkbox"] {
 /* ── Loop bar ───────────────────────────────────────────────────────────── */
 
 .loopbar {
-  flex-wrap: wrap;
-  gap: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: rgba(11, 18, 32, 0.55);
+}
+
+.loop-row {
+  flex-wrap: wrap;
+  gap: 14px;
 }
 
 .loop-toggle,
@@ -246,12 +253,31 @@ input[type="checkbox"] {
 
 .bar-tools { gap: 10px; }
 .grid-ctl,
-.setup-ctl { gap: 5px; }
+.preset-ctl { gap: 5px; }
 
 .bpm-ctl input { width: 84px; }
 
-#fadeVal {
-  min-width: 58px;
+/* Edge sliders: label under the track keeps each pair narrow; the in pair sits
+   left, the out pair right, and either wraps when the row cannot hold both. */
+.edges { gap: 12px; }
+.edges-out { margin-left: auto; }
+
+.edge {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 104px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.edge input[type="range"] { width: 100%; }
+
+.edge-cap {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
@@ -276,9 +302,9 @@ input[type="checkbox"] {
 .status { margin-left: auto; }
 .status.ok { color: #86efac; }
 .status.error,
-.setup-error { color: #fca5a5; }
+.preset-error { color: #fca5a5; }
 
-/* ── Setup dialog ───────────────────────────────────────────────────────── */
+/* ── Preset dialog ───────────────────────────────────────────────────────── */
 
 dialog {
   width: min(560px, calc(100vw - 32px));
@@ -291,25 +317,25 @@ dialog {
 
 dialog::backdrop { background: rgba(2, 6, 14, 0.72); }
 
-.setup-body {
+.preset-body {
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 18px;
 }
 
-.setup-body h2 {
+.preset-body h2 {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
 }
 
-.setup-body p {
+.preset-body p {
   margin: 0;
   font-size: 13px;
 }
 
-.setup-body textarea {
+.preset-body textarea {
   width: 100%;
   min-height: 220px;
   resize: vertical;
@@ -319,7 +345,7 @@ dialog::backdrop { background: rgba(2, 6, 14, 0.72); }
   font: 12px/1.5 var(--mono);
 }
 
-.setup-error { min-height: 1.2em; }
+.preset-error { min-height: 1.2em; }
 
 .dialog-actions {
   justify-content: flex-end;

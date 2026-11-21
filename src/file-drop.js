@@ -1,10 +1,9 @@
 /**
  * Drag-and-drop + hidden file picker for the source track.
  *
- * Adapted from wave-gpu's `src/ui/file-drop.ts`: listen on the document so a
- * drop anywhere works, track drag depth so leave events on child elements do
- * not flicker the state, and reset the input value so picking the same file
- * twice fires `change` again.
+ * Listen on the document so a drop anywhere works, track drag depth so leave
+ * events on child elements do not flicker the state, and reset the input value
+ * so picking the same file twice fires `change` again.
  */
 
 export function createFileDrop(doc, { onFile, onError, stage }) {

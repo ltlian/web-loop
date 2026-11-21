@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loop.ltlian.com/preset.schema.json",
+  "title": "web-loop preset",
+  "description": "The JSON that copy preset emits and load preset accepts: tempo, grid phase and the loop envelope for one audio file. The file itself is not part of the preset. Each marker has its own window: the left marker fades in over [start-inPreMs, start+inPostMs], the right marker fades out over [end-outPreMs, end+outPostMs]. The period is the loop region itself. The post-roll after the end overlays the restarted head; the pre-roll before the start overlays the loop tail at the end. The crossfade window is the union of the two windows around the seam, and the body is the region trimmed by max(inPreMs, outPreMs) at the tail and max(inPostMs, outPostMs) at the head. Zero-length windows are hard edges; the author owns the gain sum and any seam click. This is a shape and range contract only; end > start, the one-bar minimum and containment within the track are checked by the app against the decoded audio.",
+  "type": "object",
+  "required": ["loop"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URI of this schema. copy preset writes it so editors validate and autocomplete the pasted JSON."
+    },
+    "format": {
+      "const": "web-loop/preset",
+      "description": "Format marker. The loader rejects only a present, different format."
+    },
+    "version": {
+      "const": 1,
+      "description": "Preset format version; bumped when the shape changes incompatibly."
+    },
+    "track": {
+      "type": ["string", "null"],
+      "description": "File name at copy time, for humans. Informational: loading a preset does not use it."
+    },
+    "bpm": {
+      "type": "number",
+      "minimum": 40,
+      "maximum": 240,
+      "description": "Effective tempo in beats per minute. Omitted means keep the current tempo."
+    },
+    "gridOffsetMs": {
+      "type": "number",
+      "description": "Shift of the bar grid relative to time zero, in milliseconds. Unbounded; omitted means keep the current offset."
+    },
+    "loop": {
+      "type": "object",
+      "required": ["start", "end"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether looping is switched on."
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Loop in-point in seconds within the audio file."
+        },
+        "end": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Loop out-point in seconds within the audio file; must be after start."
+        },
+        "inPreMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3000,
+          "default": 0,
+          "description": "Incoming fade-in before the left marker. The pre-roll overlays the loop tail as playback approaches the end."
+        },
+        "inPostMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3000,
+          "default": 0,
+          "description": "Incoming fade-in after the left marker; zero is a hard start on the head."
+        },
+        "outPreMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3000,
+          "default": 0,
+          "description": "Outgoing fade-out before the right marker; the loop tail fades inside the region."
+        },
+        "outPostMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3000,
+          "default": 0,
+          "description": "Outgoing fade-out after the right marker. The post-roll overlays the restarted head; zero is a hard end."
+        },
+        "curve": {
+          "enum": ["equal-power", "linear"],
+          "default": "equal-power",
+          "description": "Fade curve. Any other value loads as equal-power."
+        }
+      }
+    }
+  }
+}

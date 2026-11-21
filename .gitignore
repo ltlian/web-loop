@@ -11,3 +11,6 @@ npm-debug.log*
 
 # wrangler local state
 .wrangler/
+
+# local working artifacts (mocks, shots); never source
+.scratch/

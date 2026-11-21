@@ -9,13 +9,37 @@
  * Two stacked canvases in the timeline: static detail (redrawn on zoom/pan)
  * and an overlay (loop region, fade zones, handles, playhead) redrawn per frame.
  */
-const FADE = 'rgba(251,191,36,0.16)'
-const FADE_LINE = 'rgba(251,191,36,0.55)'
-const LOOP_FILL = 'rgba(125,211,252,0.07)'
-const HANDLE = '#7dd3fc'
+const LOOP_FILL = 'rgba(148,163,184,0.055)'
+const HANDLE_LEFT = '#93c5fd'
+const HANDLE_RIGHT = '#fbbf24'
+const WAVE_LEFT = '#3b82f6'
+const WAVE_RIGHT = '#fbbf24'
+const WAVE_BASE = '#7dd3fc'
+const FADE_LEFT = 'rgba(59,130,246,0.06)'
+const FADE_RIGHT = 'rgba(251,191,36,0.07)'
+const EDGE_LEFT = 'rgba(96,165,250,0.55)'
+const EDGE_RIGHT = 'rgba(251,191,36,0.55)'
 const MIN_SPAN = 0.05
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))
+
+/** Incoming 0 -> 1 over [start-pre, start+post]. */
+function inGainAt(u, pre, post, curve) {
+  if (pre + post <= 0) return u < 0 ? 0 : 1
+  if (u <= -pre) return 0
+  if (u >= post) return 1
+  const t = (u + pre) / (pre + post)
+  return curve === 'linear' ? t : Math.sin((t * Math.PI) / 2)
+}
+
+/** Outgoing 1 -> 0 over [end-pre, end+post]. */
+function outGainAt(u, pre, post, curve) {
+  if (pre + post <= 0) return u < 0 ? 1 : 0
+  if (u <= -pre) return 1
+  if (u >= post) return 0
+  const t = (u + pre) / (pre + post)
+  return curve === 'linear' ? 1 - t : Math.cos((t * Math.PI) / 2)
+}
 
 function drawEdgeIndicator(ctx, w, h, x, label, color, alpha = 1) {
   const left = x < 0
@@ -55,6 +79,8 @@ export class WaveformView {
     this.gridOrigin = null
     this.viewStart = 0
     this.viewEnd = 1
+    this.loop = null
+    this.loopSig = ''
   }
 
   setBuffer(buffer) {
@@ -63,6 +89,8 @@ export class WaveformView {
   }
 
   setTrack(track, barLen, gridOrigin) {
+    this.loop = null
+    this.loopSig = ''
     this.peaks = track.peaks
     this.duration = track.duration
     this.barLen = barLen
@@ -80,6 +108,45 @@ export class WaveformView {
   setBarLen(barLen) {
     this.barLen = barLen
     this.drawWave()
+  }
+
+  /**
+   * Tell the static waveform about the current envelope. Called from redraw;
+   * only redraws when the markers, fades or curve actually changed.
+   */
+  setLoopEnvelope(loop) {
+    const active = loop?.enabled ? loop : null
+    const sig = active
+      ? [active.start, active.end, active.inPre, active.inPost, active.outPre, active.outPost, active.curve].join('|')
+      : 'off'
+    if (sig === this.loopSig) return
+    this.loopSig = sig
+    this.loop = active
+    this.drawWave()
+  }
+
+  waveFillStyle(ctx) {
+    const loop = this.loop
+    if (!loop || !(loop.end > loop.start)) return WAVE_BASE
+    const x0 = this.xForTime(loop.start), x1 = this.xForTime(loop.end)
+    if (!(x1 > x0 + 0.5)) return WAVE_BASE
+    const g = ctx.createLinearGradient(x0, 0, x1, 0)
+    g.addColorStop(0, WAVE_LEFT)
+    g.addColorStop(1, WAVE_RIGHT)
+    return g
+  }
+
+  /** The gain applied to the loop's own waveform at source time t. */
+  waveGainAt(t) {
+    const loop = this.loop
+    if (!loop) return 1
+    const { start, end } = loop
+    const inPre = loop.inPre ?? 0, inPost = loop.inPost ?? 0
+    const outPre = loop.outPre ?? 0, outPost = loop.outPost ?? 0
+    const p = t - start, u = t - end
+    if (p >= 0 && p < Math.max(inPost, outPost)) return inGainAt(p, inPre, inPost, loop.curve)
+    if (u >= -Math.max(inPre, outPre) && u < 0) return outGainAt(u, outPre, outPost, loop.curve)
+    return 1
   }
 
   resize() {
@@ -135,6 +202,7 @@ export class WaveformView {
     if (this.buffer) this.drawFromSamples(ctx)
     else this.drawFromPeaks(ctx)
 
+    this.drawProjections(ctx)
     this.drawLabels(ctx)
   }
 
@@ -165,9 +233,10 @@ export class WaveformView {
     const a = Math.max(0, Math.floor(this.viewStart * sr))
     const z = Math.min(ch.length, Math.ceil(this.viewEnd * sr))
     const spp = (z - a) / w
+    const span = this.windowSpan()
     const mid = h / 2
     const amp = h * 0.46
-    ctx.fillStyle = '#7dd3fc'
+    ctx.fillStyle = this.waveFillStyle(ctx)
     if (spp >= 2) {
       for (let x = 0; x < w; x++) {
         const i0 = a + Math.floor(x * spp)
@@ -178,17 +247,20 @@ export class WaveformView {
           if (v < lo) lo = v
           if (v > hi) hi = v
         }
-        const y0 = mid - hi * amp
-        const y1 = mid - lo * amp
+        const gain = this.waveGainAt(this.viewStart + ((x + 0.5) / w) * span)
+        if (gain <= 0.001) continue
+        const y0 = mid - hi * amp * gain
+        const y1 = mid - lo * amp * gain
         ctx.fillRect(x, y0, 1, Math.max(1, y1 - y0))
       }
     } else {
-      ctx.strokeStyle = '#7dd3fc'
+      ctx.strokeStyle = this.waveFillStyle(ctx)
       ctx.lineWidth = 1.25
       ctx.beginPath()
       for (let x = 0; x <= w; x++) {
         const i = Math.min(z - 1, a + Math.floor((x / w) * (z - a)))
-        const y = mid - ch[i] * amp
+        const gain = this.waveGainAt(i / sr)
+        const y = mid - ch[i] * amp * gain
         if (x === 0) ctx.moveTo(x, y)
         else ctx.lineTo(x, y)
       }
@@ -202,7 +274,7 @@ export class WaveformView {
     const { w, h } = this
     const mid = h / 2, amp = h * 0.46
     const d = this.duration
-    ctx.fillStyle = '#7dd3fc'
+    ctx.fillStyle = this.waveFillStyle(ctx)
     for (let x = 0; x < w; x++) {
       const t0 = this.viewStart + (x / w) * this.windowSpan()
       const t1 = this.viewStart + ((x + 1) / w) * this.windowSpan()
@@ -214,9 +286,76 @@ export class WaveformView {
         if (mn < lo) lo = mn
         if (mx > hi) hi = mx
       }
-      const y0 = mid - hi * amp, y1 = mid - lo * amp
+      const gain = this.waveGainAt((t0 + t1) / 2)
+      if (gain <= 0.001) continue
+      const y0 = mid - hi * amp * gain, y1 = mid - lo * amp * gain
       ctx.fillRect(x, y0, 1, Math.max(1, y1 - y0))
     }
+  }
+
+  /**
+   * Draw the other range's waveform where it will be heard: the post-roll from
+   * beyond the right marker at the loop head, and the pre-roll from before the
+   * left marker at the loop tail. Each is shifted by one loop and faded by its
+   * outgoing/incoming gain.
+   */
+  drawProjections(ctx) {
+    const loop = this.loop
+    if (!loop || !this.buffer) return
+    const liveL = loop.end - loop.start
+    const outPost = loop.outPost ?? 0
+    const inPre = loop.inPre ?? 0
+    if (outPost > 0) {
+      this.drawProjection(
+        ctx,
+        loop.start, loop.start + outPost, liveL,
+        (t) => outGainAt(t - loop.start, loop.outPre ?? 0, outPost, loop.curve),
+        WAVE_RIGHT,
+      )
+    }
+    if (inPre > 0) {
+      this.drawProjection(
+        ctx,
+        loop.end - inPre, loop.end, -liveL,
+        (t) => inGainAt(t - loop.end, inPre, loop.inPost ?? 0, loop.curve),
+        WAVE_LEFT,
+      )
+    }
+  }
+
+  drawProjection(ctx, outStart, outEnd, srcOffset, gainFn, color) {
+    const buf = this.buffer
+    if (!buf || !(outEnd > outStart)) return
+    const sr = buf.sampleRate
+    const ch = buf.getChannelData(0)
+    const { w, h } = this
+    const mid = h / 2, amp = h * 0.46
+    const x0 = Math.max(0, Math.floor(this.xForTime(outStart)))
+    const x1 = Math.min(w, Math.ceil(this.xForTime(outEnd)))
+    if (x1 <= x0) return
+    const secPerPx = this.windowSpan() / w
+    ctx.save()
+    ctx.globalAlpha = 0.58
+    ctx.fillStyle = color
+    for (let x = x0; x < x1; x++) {
+      const tOut = this.timeForX(x + 0.5)
+      const gain = gainFn(tOut)
+      if (gain <= 0.001) continue
+      const tSrc = tOut + srcOffset
+      const s0 = Math.max(0, Math.floor((tSrc - secPerPx / 2) * sr))
+      const s1 = Math.min(ch.length, Math.ceil((tSrc + secPerPx / 2) * sr))
+      if (s1 <= s0) continue
+      let lo = 0, hi = 0
+      for (let i = s0; i < s1; i++) {
+        const v = ch[i]
+        if (v < lo) lo = v
+        if (v > hi) hi = v
+      }
+      const y0 = mid - hi * amp * gain
+      const y1 = mid - lo * amp * gain
+      ctx.fillRect(x, y0, 1, Math.max(1, y1 - y0))
+    }
+    ctx.restore()
   }
 
   drawLabels(ctx) {
@@ -269,33 +408,39 @@ export class WaveformView {
         ctx.fillStyle = LOOP_FILL
         ctx.fillRect(x0, 0, x1 - x0, h)
 
-        const fpx = Math.max(1, (loop.fade / this.windowSpan()) * w)
-        const fillX = (a, b) => {
+        const span = this.windowSpan()
+        const inPrePx = ((loop.inPre ?? 0) / span) * w
+        const inPostPx = ((loop.inPost ?? 0) / span) * w
+        const outPrePx = ((loop.outPre ?? 0) / span) * w
+        const outPostPx = ((loop.outPost ?? 0) / span) * w
+        const leftStart = ax - inPrePx, leftEnd = ax + inPostPx
+        const rightStart = bx - outPrePx, rightEnd = bx + outPostPx
+        const drawWindow = (a, b, fill, edge) => {
           const s = clamp(a, 0, w), e = clamp(b, 0, w)
-          if (e > s) ctx.fillRect(s, 0, e - s, h)
+          if (e <= s) return
+          ctx.fillStyle = fill
+          ctx.fillRect(s, 0, e - s, h)
+          ctx.strokeStyle = edge
+          ctx.lineWidth = 1
+          ctx.setLineDash([3, 4])
+          ctx.strokeRect(s + 0.5, 2.5, Math.max(1, e - s - 1), h - 5)
+          ctx.setLineDash([])
         }
-        if (loop.fade > 0) {
-          ctx.fillStyle = FADE
-          // use the *unclamped* marker positions: a marker outside the view
-          // must not paint its fade zone pinned to the edge
-          if (loop.mode === 'lead') {
-            // pre-roll before the first marker + loop tail before the second
-            fillX(ax - fpx, ax)
-            fillX(bx - fpx, bx)
-          } else if (loop.mode === 'keep') {
-            // head fade-in + post-roll after the second marker
-            fillX(ax, ax + fpx)
-            fillX(bx, bx + fpx)
-            if (bx > 0 && bx < w) {
-              ctx.strokeStyle = FADE_LINE
-              ctx.lineWidth = 1
-              ctx.beginPath(); ctx.moveTo(bx + 0.5, 0); ctx.lineTo(bx + 0.5, h); ctx.stroke()
-            }
-          } else {
-            fillX(ax, ax + fpx)
-            fillX(bx - fpx, bx)
-          }
+        // unclamped marker positions keep an off-screen marker from painting at the edge
+        if (leftEnd > leftStart) drawWindow(leftStart, leftEnd, FADE_LEFT, EDGE_LEFT)
+        if (rightEnd > rightStart) drawWindow(rightStart, rightEnd, FADE_RIGHT, EDGE_RIGHT)
+
+        const label = (text, x, y, color) => {
+          if (x < 0 || x > w - 24) return
+          ctx.font = '9px ui-monospace, monospace'
+          ctx.lineWidth = 3
+          ctx.strokeStyle = 'rgba(11,18,32,.9)'
+          ctx.strokeText(text, x, y)
+          ctx.fillStyle = color
+          ctx.fillText(text, x, y)
         }
+        if (leftEnd > leftStart) label('fade-in', clamp(leftStart, 0, w) + 4, 14, HANDLE_LEFT)
+        if (rightEnd > rightStart) label('fade-out', clamp(rightStart, 0, w) + 4, 14, HANDLE_RIGHT)
 
         if (loop.effectiveEnd && loop.effectiveEnd < loop.end - 1e-3) {
           const xe = xOf(loop.effectiveEnd)
@@ -308,13 +453,13 @@ export class WaveformView {
           }
         }
 
-        for (const [x, visible] of [[ax, ax > -10 && ax < w + 10], [bx, bx > -10 && bx < w + 10]]) {
+        for (const [x, color, visible] of [[ax, HANDLE_LEFT, ax > -10 && ax < w + 10], [bx, HANDLE_RIGHT, bx > -10 && bx < w + 10]]) {
           if (!visible) continue
           const hx = clamp(x, 2, w - 2)
-          ctx.strokeStyle = HANDLE
+          ctx.strokeStyle = color
           ctx.lineWidth = 1.5
           ctx.beginPath(); ctx.moveTo(hx, 0); ctx.lineTo(hx, h); ctx.stroke()
-          ctx.fillStyle = HANDLE
+          ctx.fillStyle = color
           ctx.beginPath(); ctx.moveTo(hx - 5, 0); ctx.lineTo(hx + 5, 0); ctx.lineTo(hx, 9); ctx.closePath(); ctx.fill()
           ctx.beginPath(); ctx.moveTo(hx - 5, h); ctx.lineTo(hx + 5, h); ctx.lineTo(hx, h - 9); ctx.closePath(); ctx.fill()
         }
@@ -323,21 +468,22 @@ export class WaveformView {
 
     const list = heads?.length ? heads : [{ t: position, kind: 'main' }]
 
-    // every overlapping source: amber bars for the fade tail
+    // every overlapping source: amber for the right/post-roll, blue for the left/pre-roll
     for (const h of list) {
       if (h.kind !== 'tail') continue
       const tx = xOf(h.t)
+      const color = h.label === 'lead' ? HANDLE_LEFT : HANDLE_RIGHT
       const alpha = clamp(h.gain ?? 1, 0, 1)
       if (tx >= -2 && tx <= w + 2) {
-        ctx.strokeStyle = '#fbbf24'
+        ctx.strokeStyle = color
         ctx.lineWidth = 2
         ctx.beginPath(); ctx.moveTo(tx, 0); ctx.lineTo(tx, h); ctx.stroke()
         ctx.globalAlpha = alpha
-        ctx.fillStyle = '#fbbf24'
+        ctx.fillStyle = color
         ctx.beginPath(); ctx.moveTo(tx - 4, 0); ctx.lineTo(tx + 4, 0); ctx.lineTo(tx, 7); ctx.closePath(); ctx.fill()
         ctx.globalAlpha = 1
       } else {
-        drawEdgeIndicator(ctx, w, h, tx, h.label ?? 'tail', '#fbbf24', alpha)
+        drawEdgeIndicator(ctx, w, h, tx, h.label ?? 'tail', color, alpha)
       }
     }
 
@@ -345,7 +491,7 @@ export class WaveformView {
     const main = list.find((h) => h.kind === 'main') ?? list[0]
     const x = xOf(main.t)
     if (x >= -2 && x <= w + 2) {
-      ctx.fillStyle = 'rgba(125,211,252,0.08)'
+      ctx.fillStyle = 'rgba(148,163,184,0.05)'
       ctx.fillRect(0, 0, clamp(x, 0, w), h)
       ctx.strokeStyle = '#f8fafc'
       ctx.lineWidth = 1.5
@@ -373,10 +519,18 @@ export class WaveformView {
     ctx.fillStyle = '#0a1120'
     ctx.fillRect(0, 0, w, h)
 
+    const dur = this.duration || 1
+    if (loop?.enabled && loop.end > loop.start) {
+      const g = ctx.createLinearGradient((loop.start / dur) * w, 0, (loop.end / dur) * w, 0)
+      g.addColorStop(0, WAVE_LEFT)
+      g.addColorStop(1, WAVE_RIGHT)
+      ctx.fillStyle = g
+    } else {
+      ctx.fillStyle = 'rgba(125,211,252,0.55)'
+    }
     const n = this.peaks.length / 2
     if (n) {
       const mid = h / 2, amp = h * 0.44
-      ctx.fillStyle = 'rgba(125,211,252,0.55)'
       for (let x = 0; x < w; x++) {
         const a = Math.floor((x / w) * n)
         const b = Math.max(a + 1, Math.floor(((x + 1) / w) * n))
@@ -390,9 +544,8 @@ export class WaveformView {
       }
     }
 
-    const dur = this.duration || 1
     if (loop?.enabled && loop.end > loop.start) {
-      ctx.fillStyle = 'rgba(125,211,252,0.12)'
+      ctx.fillStyle = 'rgba(148,163,184,0.08)'
       ctx.fillRect((loop.start / dur) * w, 0, ((loop.end - loop.start) / dur) * w, h)
     }
 

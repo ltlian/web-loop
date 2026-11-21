@@ -45,47 +45,62 @@
       </section>
 
       <section class="loopbar">
-        <label class="loop-toggle">
-          <input type="checkbox" id="loop" />
-          <span>Loop region</span>
-        </label>
-        <span class="chip" id="loopIn">in —</span>
-        <span class="chip" id="loopOut">out —</span>
-        <label class="ctl">fade
-          <input type="range" id="fade" min="0" max="3000" step="5" value="120" />
-          <span id="fadeVal">120 ms</span>
-        </label>
-        <label class="ctl">mode
-          <select id="mode" title="post-roll blends the audio after the loop end into the head; lead-in blends the loop tail into the pre-roll before the start, so marker 1 plays at full level; both preserve the bar count">
-            <option value="keep">post-roll tail (keeps bars)</option>
-            <option value="lead">pre-roll lead-in (keeps bars)</option>
-          </select>
-        </label>
-        <label class="ctl">curve
-          <select id="curve">
-            <option value="equal-power">equal-power</option>
-            <option value="linear">linear</option>
-          </select>
-        </label>
-        <label class="ctl bpm-ctl">bpm
-          <input type="number" id="bpm" min="40" max="240" step="0.01" title="Effective tempo; beats the detected scalar when it is quantized" />
-          <span id="barLenInfo" class="dim"></span>
-        </label>
-        <button class="mini" id="fitLoop" title="Fit BPM and grid phase to the audio at both loop ends">fit loop</button>
-        <span class="ctl grid-ctl">grid
-          <button class="mini" id="gM2" title="Shift grid 2 beats earlier">−2♩</button>
-          <button class="mini" id="gM1" title="Shift grid 1 beat earlier">−1♩</button>
-          <button class="mini" id="gP1" title="Shift grid 1 beat later">+1♩</button>
-          <button class="mini" id="gP2" title="Shift grid 2 beats later">+2♩</button>
-          <button class="mini" id="g0" title="Reset grid offset">0</button>
-          <input type="number" id="gridMs" step="5" value="0" title="Grid offset in ms" />
-          <span id="gridVal" class="dim">0 ms</span>
-        </span>
-        <span class="setup-ctl">
-          <button class="mini" id="copySetup" disabled title="Copy this track's BPM, grid offset and loop envelope as JSON">copy setup</button>
-          <button class="mini" id="loadSetup" disabled title="Load a setup JSON pasted into a dialog">load setup</button>
-        </span>
-        <span id="loopInfo" class="loop-info"></span>
+        <div class="loop-row">
+          <label class="loop-toggle">
+            <input type="checkbox" id="loop" />
+            <span>Loop region</span>
+          </label>
+          <span class="chip" id="loopIn">in —</span>
+          <span class="chip" id="loopOut">out —</span>
+          <div class="edges edges-in">
+            <label class="edge">
+              <input type="range" id="inPre" min="0" max="3000" step="5" value="0" title="Fade-in before the left marker (pre-roll)" />
+              <span class="edge-cap"><span>in pre</span><span id="inPreVal">0 ms</span></span>
+            </label>
+            <label class="edge">
+              <input type="range" id="inPost" min="0" max="3000" step="5" value="0" title="Fade-in after the left marker (inside the region)" />
+              <span class="edge-cap"><span>in post</span><span id="inPostVal">0 ms</span></span>
+            </label>
+          </div>
+          <div class="edges edges-out">
+            <label class="edge">
+              <input type="range" id="outPre" min="0" max="3000" step="5" value="0" title="Fade-out before the right marker (inside the region)" />
+              <span class="edge-cap"><span>out pre</span><span id="outPreVal">0 ms</span></span>
+            </label>
+            <label class="edge">
+              <input type="range" id="outPost" min="0" max="3000" step="5" value="120" title="Fade-out after the right marker (post-roll tail)" />
+              <span class="edge-cap"><span>out post</span><span id="outPostVal">120 ms</span></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="loop-row ctl-row">
+          <label class="ctl bpm-ctl">bpm
+            <input type="number" id="bpm" min="40" max="240" step="0.01" title="Effective tempo; beats the detected scalar when it is quantized" />
+            <span id="barLenInfo" class="dim"></span>
+          </label>
+          <span class="ctl grid-ctl">grid
+            <button class="mini" id="gM2" title="Shift grid 2 beats earlier">−2♩</button>
+            <button class="mini" id="gM1" title="Shift grid 1 beat earlier">−1♩</button>
+            <button class="mini" id="gP1" title="Shift grid 1 beat later">+1♩</button>
+            <button class="mini" id="gP2" title="Shift grid 2 beats later">+2♩</button>
+            <button class="mini" id="g0" title="Reset grid offset">0</button>
+            <input type="number" id="gridMs" step="5" value="0" title="Grid offset in ms" />
+            <span id="gridVal" class="dim">0 ms</span>
+          </span>
+          <button class="mini" id="fitLoop" title="Fit BPM and grid phase to the audio at both loop ends">fit loop</button>
+          <label class="ctl">curve
+            <select id="curve">
+              <option value="equal-power">equal-power</option>
+              <option value="linear">linear</option>
+            </select>
+          </label>
+          <span class="preset-ctl">
+            <button class="mini" id="copyPreset" disabled title="Copy this track's BPM, grid offset and loop envelope as JSON">copy preset</button>
+            <button class="mini" id="loadPreset" disabled title="Load a preset JSON pasted into a dialog">load preset</button>
+          </span>
+          <span id="loopInfo" class="loop-info"></span>
+        </div>
       </section>
 
       <footer class="hint">
@@ -98,19 +113,19 @@
       </footer>
     </main>
 
-    <dialog id="setupDialog" aria-labelledby="setupTitle">
-      <div class="setup-body">
-        <h2 id="setupTitle">Load setup</h2>
+    <dialog id="presetDialog" aria-labelledby="presetTitle">
+      <div class="preset-body">
+        <h2 id="presetTitle">Load preset</h2>
         <p class="dim">
-          Paste a setup copied with <strong>copy setup</strong>. It sets the
+          Paste a preset copied with <strong>copy preset</strong>. It sets the
           BPM, grid offset and loop envelope; the audio file itself is not part
-          of the setup.
+          of the preset.
         </p>
-        <textarea id="setupText" rows="12" spellcheck="false" autocomplete="off" placeholder='{"format": "web-loop/setup", ...}'></textarea>
-        <p id="setupError" class="setup-error" role="alert"></p>
+        <textarea id="presetText" rows="12" spellcheck="false" autocomplete="off" placeholder='{"format": "web-loop/preset", ...}'></textarea>
+        <p id="presetError" class="preset-error" role="alert"></p>
         <div class="dialog-actions">
-          <button id="cancelSetup" type="button">Cancel</button>
-          <button id="applySetup" class="primary" type="button">Load</button>
+          <button id="cancelPreset" type="button">Cancel</button>
+          <button id="applyPreset" class="primary" type="button">Load</button>
         </div>
       </div>
     </dialog>
