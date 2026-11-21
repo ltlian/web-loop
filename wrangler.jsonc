@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "web-loop",
+  "compatibility_date": "2026-11-21",
+  // Static-only: the Worker exists to host `dist/` and nothing else, so every
+  // request is served by the asset layer. The app runs entirely in the browser.
+  "assets": {
+    "directory": "dist"
+  },
+  // `wrangler deploy` (and `wrangler dev`) build first, so dist/ is never stale.
+  "build": {
+    "command": "npm run build"
+  },
+  "routes": [{ "pattern": "loop.ltlian.com", "custom_domain": true }]
+}

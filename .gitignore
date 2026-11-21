@@ -8,3 +8,6 @@ dist/
 # tooling / OS noise
 npm-debug.log*
 .DS_Store
+
+# wrangler local state
+.wrangler/

@@ -27,6 +27,14 @@ Click **load audio** or drop a file on the page. After the first decode the
 waveform and loop controls are live; loading another file replaces the track.
 Audio is decoded at runtime, so there is no asset build step.
 
+## Deploy
+
+`npm run deploy` builds `dist/` and uploads it to Cloudflare Workers as the
+`web-loop` Worker, served at <https://loop.ltlian.com>. Pushes to `main` deploy
+the same way through GitHub Actions. The built page carries its commit as
+`<meta name="git-commit">`, so `curl -s https://loop.ltlian.com | grep git-commit`
+names what is live.
+
 ## What it does
 
 - **Waveform** with a bar grid. The detail view renders from the decoded

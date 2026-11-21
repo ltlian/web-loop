@@ -12,3 +12,13 @@ points in a track and hearing seam alternatives.
 - **No audio in the repo, by design.** The user loads a file at runtime.
 - **One `AudioContext`, position from `ctx.currentTime`**, bake-then-play. Not
   `<audio>`; sample-accurate seams and bar-snapped cuts require decoded PCM.
+
+## Deploy
+
+- Worker `web-loop`, asset-only, serves `dist/` at <https://loop.ltlian.com>
+  (custom domain in `wrangler.jsonc`). `npm run deploy` builds first through
+  `build.command`; pushes to `main` deploy the same way in CI.
+- The build stamps `<meta name="git-commit">` with `git rev-parse --short HEAD`
+  from `vite.config.js`; read it back with
+  `curl -s https://loop.ltlian.com | grep git-commit`.
+

@@ -12,9 +12,11 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "deploy": "wrangler deploy",
     "test": "node --test"
   },
   "devDependencies": {
-    "vite": "^7.1.0"
+    "vite": "^7.1.0",
+    "wrangler": "^4.164.0"
   }
 }
