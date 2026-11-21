@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Loop workbench</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%230b1220%27/%3E%3Cpath d=%27M6 16h3l3-8 4 16 3-8h7%27 fill=%27none%27 stroke=%27%237dd3fc%27 stroke-width=%272.5%27 stroke-linejoin=%27round%27/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="bar">
+        <div>
+          <h1>Loop workbench</h1>
+          <p id="meta">no audio loaded</p>
+        </div>
+        <div class="bar-tools">
+          <button id="loadAudio" title="Choose the source audio file. It is decoded locally in the browser and never uploaded.">load audio</button>
+          <input type="file" id="audioFile" accept="audio/*,.wav,.mp3,.flac,.ogg,.opus,.m4a,.aac" hidden />
+        </div>
+      </header>
+
+      <section class="timeline" id="timeline" aria-label="Waveform timeline">
+        <canvas id="wave"></canvas>
+        <canvas id="playhead"></canvas>
+        <div class="loading" id="loading">decoding…</div>
+      </section>
+      <div class="overview" id="overview" aria-label="Overview minimap">
+        <canvas id="minimap"></canvas>
+      </div>
+
+      <section class="transport">
+        <button id="play" class="primary">▶ Play</button>
+        <button id="restart" title="Back to start">⏮</button>
+        <button id="zoomOut" class="mini" title="Zoom out (−)">−</button>
+        <button id="zoomIn" class="mini" title="Zoom in (+)">+</button>
+        <button id="zoomFit" class="mini" title="Fit track (0)">fit</button>
+        <span id="zoomInfo" class="dim zoom-info"></span>
+        <div class="readout">
+          <span id="barpos"></span>
+          <span id="time">0:00.000</span>
+          <span class="dim">/</span>
+          <span id="duration" class="dim">0:00.000</span>
+        </div>
+      </section>
+
+      <section class="loopbar">
+        <label class="loop-toggle">
+          <input type="checkbox" id="loop" />
+          <span>Loop region</span>
+        </label>
+        <span class="chip" id="loopIn">in —</span>
+        <span class="chip" id="loopOut">out —</span>
+        <label class="ctl">fade
+          <input type="range" id="fade" min="0" max="3000" step="5" value="120" />
+          <span id="fadeVal">120 ms</span>
+        </label>
+        <label class="ctl">mode
+          <select id="mode" title="post-roll blends the audio after the loop end into the head; lead-in blends the loop tail into the pre-roll before the start, so marker 1 plays at full level; both preserve the bar count">
+            <option value="keep">post-roll tail (keeps bars)</option>
+            <option value="lead">pre-roll lead-in (keeps bars)</option>
+          </select>
+        </label>
+        <label class="ctl">curve
+          <select id="curve">
+            <option value="equal-power">equal-power</option>
+            <option value="linear">linear</option>
+          </select>
+        </label>
+        <label class="ctl bpm-ctl">bpm
+          <input type="number" id="bpm" min="40" max="240" step="0.01" title="Effective tempo; beats the detected scalar when it is quantized" />
+          <span id="barLenInfo" class="dim"></span>
+        </label>
+        <button class="mini" id="fitLoop" title="Fit BPM and grid phase to the audio at both loop ends">fit loop</button>
+        <span class="ctl grid-ctl">grid
+          <button class="mini" id="gM2" title="Shift grid 2 beats earlier">−2♩</button>
+          <button class="mini" id="gM1" title="Shift grid 1 beat earlier">−1♩</button>
+          <button class="mini" id="gP1" title="Shift grid 1 beat later">+1♩</button>
+          <button class="mini" id="gP2" title="Shift grid 2 beats later">+2♩</button>
+          <button class="mini" id="g0" title="Reset grid offset">0</button>
+          <input type="number" id="gridMs" step="5" value="0" title="Grid offset in ms" />
+          <span id="gridVal" class="dim">0 ms</span>
+        </span>
+        <span class="setup-ctl">
+          <button class="mini" id="copySetup" disabled title="Copy this track's BPM, grid offset and loop envelope as JSON">copy setup</button>
+          <button class="mini" id="loadSetup" disabled title="Load a setup JSON pasted into a dialog">load setup</button>
+        </span>
+        <span id="loopInfo" class="loop-info"></span>
+      </section>
+
+      <footer class="hint">
+        drag the loop handles to set the region (alt = free, no snap) · click/drag
+        elsewhere to seek · wheel zoom · shift+wheel pan · shift-drag pan ·
+        [ ] grid · +/−/0 zoom · space = play/pause · home = start ·
+        white bar = main playback, amber = fade tail · drop an audio file to load
+        or replace the track
+        <span id="status" class="status"></span>
+      </footer>
+    </main>
+
+    <dialog id="setupDialog" aria-labelledby="setupTitle">
+      <div class="setup-body">
+        <h2 id="setupTitle">Load setup</h2>
+        <p class="dim">
+          Paste a setup copied with <strong>copy setup</strong>. It sets the
+          BPM, grid offset and loop envelope; the audio file itself is not part
+          of the setup.
+        </p>
+        <textarea id="setupText" rows="12" spellcheck="false" autocomplete="off" placeholder='{"format": "web-loop/setup", ...}'></textarea>
+        <p id="setupError" class="setup-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="cancelSetup" type="button">Cancel</button>
+          <button id="applySetup" class="primary" type="button">Load</button>
+        </div>
+      </div>
+    </dialog>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
