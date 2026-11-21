@@ -1,11 +1,31 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import Ajv2020 from 'ajv/dist/2020.js'
-import { buildPreset, PRESET_SCHEMA, PRESET_VERSION } from '../src/preset.js'
+import { buildPreset, PRESET_FORMAT, PRESET_SCHEMA, PRESET_VERSION } from '../src/preset.js'
 
 const schema = JSON.parse(readFileSync(new URL('../public/preset.schema.json', import.meta.url), 'utf8'))
-const validate = new Ajv2020({ allErrors: true, strict: true }).compile(schema)
+const loopSchema = schema.properties.loop.properties
+
+// The preset copy emits for a known state, pinned field for field. A field
+// added, dropped or renamed is a format change and must fail here.
+const EXPECTED = {
+  $schema: PRESET_SCHEMA,
+  format: PRESET_FORMAT,
+  version: PRESET_VERSION,
+  track: 'your-track.wav',
+  bpm: 120,
+  gridOffsetMs: 0,
+  loop: {
+    enabled: true,
+    start: 2,
+    end: 10,
+    inPreMs: 0,
+    inPostMs: 0,
+    outPreMs: 0,
+    outPostMs: 120,
+    curve: 'equal-power',
+  },
+}
 
 function state() {
   return {
@@ -17,18 +37,28 @@ function state() {
   }
 }
 
-const errors = () => validate.errors?.map((e) => `${e.instancePath} ${e.message}`).join(', ')
+test('buildPreset emits exactly the pinned preset', () => {
+  assert.deepEqual(buildPreset(state()), EXPECTED)
+})
 
-test('the schema $id is the URL copy preset writes', () => {
+test('the emitted shape is the shape the schema documents', () => {
+  const preset = buildPreset(state())
+  assert.deepEqual(Object.keys(preset).sort(), Object.keys(schema.properties).sort())
+  assert.deepEqual(Object.keys(preset.loop).sort(), Object.keys(loopSchema).sort())
+})
+
+test('the published schema still states the app bounds', () => {
   assert.equal(schema.$id, PRESET_SCHEMA)
-})
-
-test('the schema version matches the emitter', () => {
+  assert.equal(schema.properties.format.const, PRESET_FORMAT)
   assert.equal(schema.properties.version.const, PRESET_VERSION)
-})
-
-test('buildPreset output validates against the schema', () => {
-  assert.ok(validate(buildPreset(state())), errors())
+  assert.equal(schema.properties.bpm.minimum, 40)
+  assert.equal(schema.properties.bpm.maximum, 240)
+  for (const key of ['inPreMs', 'inPostMs', 'outPreMs', 'outPostMs']) {
+    assert.equal(loopSchema[key].minimum, 0)
+    assert.equal(loopSchema[key].maximum, 3000)
+  }
+  assert.deepEqual(loopSchema.curve.enum, ['equal-power', 'linear'])
+  assert.deepEqual(schema.properties.loop.required, ['start', 'end'])
 })
 
 test('buildPreset returns null before audio loads', () => {
@@ -36,37 +66,16 @@ test('buildPreset returns null before audio loads', () => {
 })
 
 test('each marker emits its own pre/post pair', () => {
-  const preset = buildPreset(state())
-  assert.equal(preset.loop.inPreMs, 0)
-  assert.equal(preset.loop.inPostMs, 0)
-  assert.equal(preset.loop.outPreMs, 0)
-  assert.equal(preset.loop.outPostMs, 120)
-  assert.ok(validate(preset), errors())
-
   const asymmetric = { ...state(), loop: { ...state().loop, inPreMs: 80, inPostMs: 20, outPreMs: 40, outPostMs: 300 } }
-  assert.ok(validate(buildPreset(asymmetric)), errors())
+  assert.deepEqual(buildPreset(asymmetric).loop, {
+    enabled: true, start: 2, end: 10, inPreMs: 80, inPostMs: 20, outPreMs: 40, outPostMs: 300, curve: 'equal-power',
+  })
 })
 
 test('the README preset example is what copy preset emits', () => {
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
   const block = readme.match(/```json\n([\s\S]*?)```/)
   assert.ok(block, 'README.md should show a json preset example')
-  const example = JSON.parse(block[1])
-  assert.ok(validate(example), 'README example should validate against the schema')
-  const { $schema, ...emitted } = buildPreset(state())
-  assert.deepEqual(example, emitted, 'README example should match copy preset field for field')
-})
-
-test('the schema rejects values the format cannot carry', () => {
-  const badBpm = buildPreset(state())
-  badBpm.bpm = 480
-  assert.equal(validate(badBpm), false, 'bpm is clamped to 40..240')
-
-  const badPre = buildPreset(state())
-  badPre.loop.inPreMs = 4000
-  assert.equal(validate(badPre), false, 'windows are capped at 3000 ms')
-
-  const badCurve = buildPreset(state())
-  badCurve.loop.curve = 'smoothstep'
-  assert.equal(validate(badCurve), false, 'curve is limited to two values')
+  const { $schema, ...emitted } = EXPECTED
+  assert.deepEqual(JSON.parse(block[1]), emitted, 'README example should match copy preset field for field')
 })
