@@ -81,6 +81,8 @@ export class WaveformView {
     this.viewEnd = 1
     this.loop = null
     this.loopSig = ''
+    this.shimmer = null
+    this.shimmerFill = null
   }
 
   setBuffer(buffer) {
@@ -125,7 +127,14 @@ export class WaveformView {
     this.drawWave()
   }
 
+  /** Position (0..1 across the canvas) of the analysis highlight, or null. */
+  setShimmer(x) {
+    this.shimmer = x == null ? null : clamp(x, -0.2, 1.2)
+    this.drawWave()
+  }
+
   waveFillStyle(ctx) {
+    if (this.shimmerFill) return this.shimmerFill
     const loop = this.loop
     if (!loop || !(loop.end > loop.start)) return WAVE_BASE
     const x0 = this.xForTime(loop.start), x1 = this.xForTime(loop.end)
@@ -203,6 +212,7 @@ export class WaveformView {
     else this.drawFromPeaks(ctx)
 
     this.drawProjections(ctx)
+    this.drawShimmer(ctx)
     this.drawLabels(ctx)
   }
 
@@ -321,6 +331,31 @@ export class WaveformView {
         WAVE_LEFT,
       )
     }
+  }
+
+  /**
+   * Light the waveform itself: draw the same peaks again with a moving
+   * gradient fill under `lighter`, so only the audio is brightened, never the
+   * canvas behind it.
+   */
+  drawShimmer(ctx) {
+    if (this.shimmer == null || !this.duration) return
+    const { w } = this
+    const x = this.shimmer * w
+    const half = Math.max(84, w * 0.15)
+    const g = ctx.createLinearGradient(x - half, 0, x + half, 0)
+    g.addColorStop(0, 'rgba(125,211,252,0)')
+    g.addColorStop(0.38, 'rgba(125,211,252,0.24)')
+    g.addColorStop(0.5, 'rgba(255,255,255,0.6)')
+    g.addColorStop(0.62, 'rgba(125,211,252,0.24)')
+    g.addColorStop(1, 'rgba(125,211,252,0)')
+    this.shimmerFill = g
+    ctx.save()
+    ctx.globalCompositeOperation = 'lighter'
+    if (this.buffer) this.drawFromSamples(ctx)
+    else this.drawFromPeaks(ctx)
+    ctx.restore()
+    this.shimmerFill = null
   }
 
   drawProjection(ctx, outStart, outEnd, srcOffset, gainFn, color) {

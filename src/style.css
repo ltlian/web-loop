@@ -175,24 +175,23 @@ input[type="checkbox"] {
 }
 
 /* Between decode and the measurement the waveform is real but the grid is
-   still a guess; a veil and a sweeping highlight say "not ready yet". */
+   still a guess; the veil says "not ready" while the canvas lights the audio. */
 .loading.analyzing {
-  background-color: rgba(7, 11, 18, 0.45);
-  background-image: linear-gradient(105deg, transparent 40%, rgba(125, 211, 252, 0.14) 50%, transparent 60%);
-  background-repeat: no-repeat;
-  background-size: 220% 100%;
+  background: rgba(7, 11, 18, 0.3);
   color: var(--text);
   cursor: default;
-  animation: analyzing-sweep 1.7s linear infinite;
 }
 
-@keyframes analyzing-sweep {
-  from { background-position: 160% 0; }
-  to { background-position: -60% 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .loading.analyzing { animation: none; }
+.loading.analyzing > span {
+  position: relative;
+  z-index: 1;
+  padding: 7px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+  background: rgba(4, 10, 20, 0.8);
+  box-shadow: 0 8px 24px rgba(2, 6, 14, 0.45);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
 }
 
 .overview {

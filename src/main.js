@@ -9,7 +9,7 @@ import { buildPreset, PRESET_FORMAT } from './preset.js'
 const $ = (id) => document.getElementById(id)
 const el = {
   meta: $('meta'), timeline: $('timeline'), wave: $('wave'),
-  playhead: $('playhead'), loading: $('loading'), play: $('play'), restart: $('restart'),
+  playhead: $('playhead'), loading: $('loading'), loadingText: $('loadingText'), play: $('play'), restart: $('restart'),
   loop: $('loop'), time: $('time'), duration: $('duration'), barpos: $('barpos'), status: $('status'),
   loopIn: $('loopIn'), loopOut: $('loopOut'),
   inPre: $('inPre'), inPreVal: $('inPreVal'), inPost: $('inPost'), inPostVal: $('inPostVal'),
@@ -57,6 +57,7 @@ let analysisId = 0
 let beatWorker = null
 let miniDrag = false
 let panStart = null
+let shimmerRaf = 0
 const GRID_KEY = 'web-loop.gridOffsetMs'
 const saveGrid = () => {
   try { localStorage.setItem(GRID_KEY, String(gridMs)) } catch {}
@@ -405,11 +406,33 @@ function setUiLive(live) {
   el.firstRun.hidden = live
 }
 
+/** A light pass over the waveform while the grid is being measured. */
+function startShimmer() {
+  stopShimmer()
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  const started = performance.now()
+  const step = (now) => {
+    const phase = ((now - started) % 2200) / 2200
+    // ease in and out, and let the band enter and leave off-canvas
+    view.setShimmer(-0.1 + 1.2 * (0.5 - 0.5 * Math.cos(Math.PI * phase)))
+    shimmerRaf = requestAnimationFrame(step)
+  }
+  shimmerRaf = requestAnimationFrame(step)
+}
+
+function stopShimmer() {
+  if (shimmerRaf) cancelAnimationFrame(shimmerRaf)
+  shimmerRaf = 0
+  view.setShimmer(null)
+}
+
 /** The measurement is over; hand the app back to the user. */
 function finishAnalysis() {
-  el.loading.classList.remove('analyzing')
+  stopShimmer()
   el.overview.classList.remove('is-busy')
+  // keep the analyzing veil and label for the fade-out, then reset them
   setLoading(false)
+  setTimeout(() => el.loading.classList.remove('analyzing'), 200)
   setUiLive(true)
   updateMeta()
 }
@@ -575,11 +598,12 @@ async function loadAudioFile(file) {
   if (!file) return
   const my = ++loadToken
   setStatus('')
+  stopShimmer()
   setControlsLive(false)
   el.overview.classList.add('is-busy')
   setLoading(true)
   el.loading.classList.remove('analyzing')
-  el.loading.textContent = 'decoding…'
+  el.loadingText.textContent = 'decoding…'
   try {
     const buffer = await engine.decode(await file.arrayBuffer())
     if (my !== loadToken) return
@@ -630,19 +654,21 @@ async function loadAudioFile(file) {
     setPresetEnabled(true)
     renderControls()
     redraw(0)
-    el.loading.textContent = 'measuring tempo…'
+    el.loadingText.textContent = 'measuring tempo…'
     el.loading.classList.add('analyzing')
+    startShimmer()
     startAnalysis(buffer)
   } catch (err) {
     if (my !== loadToken) return
     setStatus(`could not load ${file.name}: ${err.message || err}`, 'error')
+    stopShimmer()
     el.loading.classList.remove('analyzing')
     el.overview.classList.remove('is-busy')
     if (track) {
       setLoading(false)
       setUiLive(true)
     } else {
-      el.loading.textContent = 'choose audio · or drop a file'
+      el.loadingText.textContent = 'choose audio · or drop a file'
       setLoading(true)
       setUiLive(false)
     }
@@ -1050,7 +1076,7 @@ function boot() {
   syncTempoUi()
   syncGridUi()
   el.meta.textContent = 'load the audio file to begin'
-  el.loading.textContent = 'choose audio · or drop a file'
+  el.loadingText.textContent = 'choose audio · or drop a file'
   setLoading(true)
   setUiLive(false)
   syncTempoMeta()
