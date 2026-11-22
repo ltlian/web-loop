@@ -17,8 +17,8 @@ const el = {
   outPre: $('outPre'), outPreVal: $('outPreVal'), outPost: $('outPost'), outPostVal: $('outPostVal'),
   curve: $('curve'), loopInfo: $('loopInfo'),
   bpm: $('bpm'), barLenInfo: $('barLenInfo'), fitLoop: $('fitLoop'),
-  bpmX2: $('bpmX2'), bpmD2: $('bpmD2'), tempoAlt: $('tempoCandidates'),
-  gridMs: $('gridMs'), gridVal: $('gridVal'), gM2: $('gM2'), gM1: $('gM1'), gP1: $('gP1'), gP2: $('gP2'), g0: $('g0'),
+  bpmX2: $('bpmX2'), bpmD2: $('bpmD2'), tempoAlt: $('tempoCandidates'), tempoAltLabel: $('tempoAltLabel'),
+  gridMs: $('gridMs'), gM2: $('gM2'), gM1: $('gM1'), gP1: $('gP1'), gP2: $('gP2'), g0: $('g0'),
   mini: $('minimap'), zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomFit: $('zoomFit'), zoomInfo: $('zoomInfo'),
   loadAudio: $('loadAudio'), audioFile: $('audioFile'),
   copyPreset: $('copyPreset'), loadPreset: $('loadPreset'),
@@ -90,7 +90,6 @@ const setLoading = (on) => el.loading.classList.toggle('hidden', !on)
 
 function syncGridUi() {
   el.gridMs.value = String(Math.round(gridMs))
-  el.gridVal.textContent = `${Math.round(gridMs)} ms`
 }
 
 /** Keep the four edge sliders in step with the loop state. */
@@ -395,6 +394,7 @@ function syncTempoAlt() {
   if (!el.tempoAlt) return
   const list = tempoCandidates.slice(0, 4)
   el.tempoAlt.hidden = list.length < 2
+  if (el.tempoAltLabel) el.tempoAltLabel.hidden = el.tempoAlt.hidden
   el.tempoAlt.replaceChildren()
   if (list.length < 2) return
   for (const c of list) {

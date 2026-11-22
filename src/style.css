@@ -41,8 +41,8 @@ h1 {
 .app {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  max-width: 1100px;
+  gap: 18px;
+  max-width: 1160px;
   margin: 0 auto;
   padding: 28px 24px 20px;
 }
@@ -50,12 +50,8 @@ h1 {
 .bar,
 .transport,
 .bar-tools,
-.loop-row,
 .loop-toggle,
 .ctl,
-.grid-ctl,
-.edges,
-.preset-ctl,
 .hint,
 .readout,
 .dialog-actions {
@@ -141,7 +137,7 @@ input[type="checkbox"] {
 
 .timeline {
   position: relative;
-  height: 200px;
+  height: 240px;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -225,21 +221,115 @@ input[type="checkbox"] {
   text-align: right;
 }
 
-/* ── Loop bar ───────────────────────────────────────────────────────────── */
+/* ── Control panel ─────────────────────────────────────────────────────── */
 
-.loopbar {
+.panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px;
+  gap: 16px;
+  padding: 16px 18px 14px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 14px;
   background: rgba(11, 18, 32, 0.55);
 }
 
-.loop-row {
+.panel-head {
+  display: flex;
+  align-items: center;
   flex-wrap: wrap;
+  gap: 10px;
+}
+
+.groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(7, 11, 18, 0.5);
+}
+
+.group.fades { grid-column: 1 / -1; }
+
+.group-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.unit {
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.num-lg {
+  width: 104px;
+  padding: 6px 8px;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.num { width: 88px; }
+
+button.wide { width: 100%; }
+
+.nudge button { flex: 1 1 0; min-width: 0; }
+
+.fade-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
+}
+
+.fade {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.fade-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fade input[type="range"] { width: 100%; }
+
+.group-note {
+  margin: 0;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim);
+  font-size: 13px;
 }
 
 .loop-toggle,
@@ -252,10 +342,6 @@ input[type="checkbox"] {
 .loop-toggle { cursor: pointer; }
 
 .bar-tools { gap: 10px; }
-.grid-ctl,
-.preset-ctl { gap: 5px; }
-
-.bpm-ctl input { width: 84px; }
 
 /* Tempo alternatives measured by the analyser; only shown when it found more
    than one plausible metrical level. */
@@ -266,38 +352,24 @@ select.tempo-alt {
   max-width: 96px;
 }
 
-/* Edge sliders: label under the track keeps each pair narrow; the in pair sits
-   left, the out pair right, and either wraps when the row cannot hold both. */
-.edges { gap: 12px; }
-.edges-out { margin-left: auto; }
-
-.edge {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 104px;
-  color: var(--dim);
-  font-size: 12px;
-}
-
-.edge input[type="range"] { width: 100%; }
-
-.edge-cap {
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
 .loop-info {
-  margin-left: auto;
+  margin: 0;
   color: var(--dim);
   font-family: var(--mono);
   font-size: 12px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
 }
 
 .loop-info.warn { color: #fbbf24; }
+
+@media (max-width: 820px) {
+  .groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .groups { grid-template-columns: 1fr; }
+}
 
 /* ── Footer ─────────────────────────────────────────────────────────────── */
 
