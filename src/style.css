@@ -443,6 +443,15 @@ select.tempo-alt {
 }
 
 .status { margin-left: auto; }
+
+.credits a {
+  color: var(--dim);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 2px;
+}
+
+.credits a:hover { color: var(--accent); }
 .status.ok { color: #86efac; }
 .status.error,
 .preset-error { color: #fca5a5; }
