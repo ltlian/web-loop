@@ -29,7 +29,7 @@
         <canvas id="minimap"></canvas>
       </div>
 
-      <section class="transport">
+      <section class="transport" id="transport">
         <button id="play" class="primary">▶ Play</button>
         <button id="restart" title="Back to start">⏮</button>
         <button id="zoomOut" class="mini" title="Zoom out (−)">−</button>
@@ -44,7 +44,7 @@
         </div>
       </section>
 
-      <section class="panel" aria-label="Loop controls">
+      <section class="panel" id="panel" aria-label="Loop controls">
         <header class="panel-head">
           <label class="loop-toggle">
             <input type="checkbox" id="loop" />
@@ -52,11 +52,19 @@
           </label>
           <span class="chip" id="loopIn">in —</span>
           <span class="chip" id="loopOut">out —</span>
+          <div class="panel-tools">
+            <button class="mini" id="copyPreset" disabled title="Copy this track's BPM, bar offset and loop envelope as JSON">copy preset</button>
+            <button class="mini" id="loadPreset" disabled title="Load a preset JSON pasted into a dialog">load preset</button>
+          </div>
         </header>
 
         <div class="groups">
           <section class="group">
-            <h2 class="group-title">Tempo</h2>
+            <div class="group-head">
+              <h2 class="group-title">Tempo</h2>
+              <span class="tag" id="tempoTag" hidden></span>
+            </div>
+            <p class="group-note" id="tempoNote">Measured from the file you load.</p>
             <div class="row">
               <input type="number" id="bpm" class="num-lg" min="40" max="240" step="0.01" title="Effective tempo; measured from the audio when a file loads" />
               <span id="barLenInfo" class="unit">—</span>
@@ -64,36 +72,32 @@
             <div class="row">
               <button class="mini" id="bpmD2" title="Halve the tempo (half-time reading)">÷2</button>
               <button class="mini" id="bpmX2" title="Double the tempo (double-time reading)">×2</button>
-              <span class="unit" id="tempoAltLabel" hidden>alt</span>
+              <span class="unit" id="tempoAltLabel" hidden>or</span>
               <select id="tempoCandidates" class="tempo-alt" title="Tempo alternatives measured from this track" hidden></select>
             </div>
-            <button class="wide" id="fitLoop" title="Align the grid and the loop to the beats nearest the loop ends">fit loop</button>
+            <button class="wide" id="fitLoop" title="Move the bar lines and the loop ends onto the nearest measured beats">fit loop to beats</button>
           </section>
 
           <section class="group">
-            <h2 class="group-title">Grid</h2>
+            <div class="group-head">
+              <h2 class="group-title">Bar lines</h2>
+            </div>
+            <p class="group-note">The loop snaps to these lines. Shift them until they sit on the beat.</p>
             <div class="row nudge">
-              <button class="mini" id="gM2" title="Shift grid 2 beats earlier">−2♩</button>
-              <button class="mini" id="gM1" title="Shift grid 1 beat earlier">−1♩</button>
-              <button class="mini" id="gP1" title="Shift grid 1 beat later">+1♩</button>
-              <button class="mini" id="gP2" title="Shift grid 2 beats later">+2♩</button>
-              <button class="mini" id="g0" title="Reset grid offset">0</button>
+              <span class="unit">shift bar 0</span>
+              <button class="mini" id="gM2" title="Shift bar 0 two beats earlier">−2</button>
+              <button class="mini" id="gM1" title="Shift bar 0 one beat earlier">−1</button>
+              <button class="mini" id="gP1" title="Shift bar 0 one beat later">+1</button>
+              <button class="mini" id="gP2" title="Shift bar 0 two beats later">+2</button>
+              <button class="mini" id="g0" title="Put bar 0 at the start of the track">reset</button>
             </div>
             <div class="row">
               <label class="field" for="gridMs">bar 0 at
-                <input type="number" id="gridMs" class="num" step="5" value="0" title="Time of bar 0, the grid origin, in milliseconds. Negative values put bar 0 before the track starts." />
+                <input type="number" id="gridMs" class="num" step="5" value="0" title="Time of bar 0, the first bar line, in milliseconds. Negative values put bar 0 before the track starts." />
                 <span class="unit">ms</span>
               </label>
+              <button class="mini" id="setGridHere" title="Put bar 0 at the playhead; the loop moves to the nearest bar lines">set here</button>
             </div>
-          </section>
-
-          <section class="group">
-            <h2 class="group-title">Preset</h2>
-            <div class="row">
-              <button class="mini" id="copyPreset" disabled title="Copy this track's BPM, grid offset and loop envelope as JSON">copy</button>
-              <button class="mini" id="loadPreset" disabled title="Load a preset JSON pasted into a dialog">load</button>
-            </div>
-            <p class="group-note">BPM, grid and fades as JSON. The audio stays local.</p>
           </section>
 
           <section class="group fades">
@@ -131,11 +135,10 @@
       </section>
 
       <footer class="hint">
-        drag the loop handles to set the region (ctrl/alt = free, no snap) · click/drag
-        elsewhere to seek · wheel zoom · shift+wheel pan · shift-drag pan ·
-        [ ] grid · +/−/0 zoom · space = play/pause · home = start ·
-        white bar = main playback, amber = fade tail · drop an audio file to load
-        or replace the track
+        <span id="shortcuts" hidden>
+          press play to hear the loop · drag its handles to set the region (ctrl/alt = free, no snap) · click/drag elsewhere to seek · wheel zoom · shift+wheel pan · shift-drag pan · [ ] shift bar 0 by a beat · +/−/0 zoom · space = play/pause · home = start · white bar = main playback, amber = fade tail · drop an audio file to replace the track
+        </span>
+        <span id="firstRun">drop an audio file anywhere — it is decoded locally and never uploaded</span>
         <span id="status" class="status"></span>
       </footer>
     </main>
@@ -145,7 +148,7 @@
         <h2 id="presetTitle">Load preset</h2>
         <p class="dim">
           Paste a preset copied with <strong>copy preset</strong>. It sets the
-          BPM, grid offset and loop envelope; the audio file itself is not part
+          BPM, bar offset and loop envelope; the audio file itself is not part
           of the preset.
         </p>
         <textarea id="presetText" rows="12" spellcheck="false" autocomplete="off" placeholder='{"format": "web-loop/preset", ...}'></textarea>

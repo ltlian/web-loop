@@ -401,6 +401,24 @@ export class WaveformView {
     ctx.clearRect(0, 0, w, h)
     const xOf = (t) => this.xForTime(t)
 
+    // The region while the loop is off: no handles, just enough of an outline
+    // that the toggle has a visible subject.
+    if (loop && !loop.enabled && loop.end > loop.start) {
+      const x0 = clamp(xOf(loop.start), 0, w)
+      const x1 = clamp(xOf(loop.end), 0, w)
+      if (x1 > x0) {
+        ctx.fillStyle = 'rgba(125,211,252,0.05)'
+        ctx.fillRect(x0, 0, x1 - x0, h)
+        ctx.save()
+        ctx.setLineDash([4, 5])
+        ctx.strokeStyle = 'rgba(125,211,252,0.3)'
+        ctx.lineWidth = 1
+        ctx.beginPath(); ctx.moveTo(x0 + 0.5, 0); ctx.lineTo(x0 + 0.5, h); ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(x1 - 0.5, 0); ctx.lineTo(x1 - 0.5, h); ctx.stroke()
+        ctx.restore()
+      }
+    }
+
     if (loop?.enabled && loop.end > loop.start) {
       const ax = xOf(loop.start), bx = xOf(loop.end)
       if (bx > 0 && ax < w) {
@@ -544,8 +562,8 @@ export class WaveformView {
       }
     }
 
-    if (loop?.enabled && loop.end > loop.start) {
-      ctx.fillStyle = 'rgba(148,163,184,0.08)'
+    if (loop && loop.end > loop.start) {
+      ctx.fillStyle = loop.enabled ? 'rgba(148,163,184,0.08)' : 'rgba(125,211,252,0.10)'
       ctx.fillRect((loop.start / dur) * w, 0, ((loop.end - loop.start) / dur) * w, h)
     }
 

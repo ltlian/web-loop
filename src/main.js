@@ -18,9 +18,12 @@ const el = {
   curve: $('curve'), loopInfo: $('loopInfo'),
   bpm: $('bpm'), barLenInfo: $('barLenInfo'), fitLoop: $('fitLoop'),
   bpmX2: $('bpmX2'), bpmD2: $('bpmD2'), tempoAlt: $('tempoCandidates'), tempoAltLabel: $('tempoAltLabel'),
+  tempoTag: $('tempoTag'), tempoNote: $('tempoNote'),
   gridMs: $('gridMs'), gM2: $('gM2'), gM1: $('gM1'), gP1: $('gP1'), gP2: $('gP2'), g0: $('g0'),
+  setGridHere: $('setGridHere'),
   mini: $('minimap'), zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomFit: $('zoomFit'), zoomInfo: $('zoomInfo'),
   loadAudio: $('loadAudio'), audioFile: $('audioFile'),
+  panel: $('panel'), transport: $('transport'), shortcuts: $('shortcuts'), firstRun: $('firstRun'),
   copyPreset: $('copyPreset'), loadPreset: $('loadPreset'),
   presetDialog: $('presetDialog'), presetText: $('presetText'), presetError: $('presetError'),
   cancelPreset: $('cancelPreset'), applyPreset: $('applyPreset'),
@@ -44,7 +47,13 @@ let bpm = 120
 // A measurement only lands while it is still 'pending', so a preset or a user
 // edit is never overwritten by a late worker result.
 let tempoSource = 'default'
+// results the user can inspect after the measurement: whether the downbeat is
+// convincing, and the metrical alternatives the tempo search could not separate
+let tempoUncertain = false
 let tempoCandidates = []
+// the user moved the loop or the view; a late measurement must not undo that
+let loopTouched = false
+let viewTouched = false
 let analysisId = 0
 let beatWorker = null
 // onset envelope of the current track, measured by the worker and reused by
@@ -137,15 +146,16 @@ function updateLoopInfo() {
   const outPre = (baked.outPreSeconds * 1000).toFixed(0)
   const outPost = (baked.outPostSeconds * 1000).toFixed(0)
   const seamDb = baked.wrapStep > 1e-9 ? (20 * Math.log10(baked.wrapStep)).toFixed(1) : '−∞'
-  let text = `period ${periodMs} ms · ${bars.toFixed(3)} bars · window ${windowMs} ms · body ${bodyMs} ms · in ${inPre}+${inPost} ms · out ${outPre}+${outPost} ms · seam ${seamDb} dBFS`
-  let warn = false
-  if (baked.inPreClipped) { warn = true; text += ` · ⚠ in pre limited to ${inPre} ms` }
-  if (baked.outPostClipped) { warn = true; text += ` · ⚠ out post limited to ${outPost} ms` }
-  if (baked.fadeInClipped) { warn = true; text += ' · ⚠ fade-in window clipped' }
-  if (baked.fadeOutClipped) { warn = true; text += ' · ⚠ fade-out window clipped' }
-  if (baked.windowClipped) { warn = true; text += ' · ⚠ windows exceed the loop' }
-  if (baked.wrapStep > 0.05) { warn = true; text += ' · ⚠ seam step is audible' }
-  el.loopInfo.textContent = text
+  const detail = `period ${periodMs} ms · ${bars.toFixed(3)} bars · window ${windowMs} ms · body ${bodyMs} ms · in ${inPre}+${inPost} ms · out ${outPre}+${outPost} ms · seam ${seamDb} dBFS`
+  const notes = []
+  if (baked.inPreClipped) notes.push(`⚠ in pre limited to ${inPre} ms`)
+  if (baked.outPostClipped) notes.push(`⚠ out post limited to ${outPost} ms`)
+  if (baked.fadeInClipped) notes.push('⚠ fade-in window clipped')
+  if (baked.fadeOutClipped) notes.push('⚠ fade-out window clipped')
+  if (baked.windowClipped) notes.push('⚠ windows exceed the loop')
+  const warn = notes.length > 0
+  el.loopInfo.textContent = [`${bars.toFixed(3)} bars`, `${baked.loopLength.toFixed(3)} s`, ...notes].join(' · ')
+  el.loopInfo.title = detail
   el.loopInfo.classList.toggle('warn', warn)
 }
 
@@ -189,7 +199,9 @@ function computeHeads(t = currentSourceTime()) {
 }
 
 function redraw(t = currentSourceTime()) {
-  const loopView = loop.enabled
+  // the region is drawn even while the loop is off, dimmed, so the checkbox
+  // reads as "turn this on" rather than "create a region"
+  const loopView = sourceBuffer
     ? {
         ...loop,
         inPre: baked?.inPreSeconds ?? loop.inPreMs / 1000,
@@ -225,6 +237,7 @@ const minLoop = () => barLenNow()
 
 function bakeNow() {
   if (!sourceBuffer || !engine.ctx) return
+  if (!(loop.end - loop.start > 0)) return
   baked = bakeLoop(engine.ctx, sourceBuffer, {
     start: loop.start, end: loop.end,
     inPre: loop.inPreMs / 1000, inPost: loop.inPostMs / 1000,
@@ -258,6 +271,7 @@ function rebake() {
 
 function setLoopEnabled(enabled) {
   if (!sourceBuffer) { el.loop.checked = false; return }
+  loopTouched = true
   const wasPlaying = engine.playing
   const srcTime = currentSourceTime()
   engine.pause()
@@ -276,11 +290,121 @@ function setLoopEnabled(enabled) {
   redraw()
 }
 
+/** Whole bars from the first bar line, or whatever is left of a short track. */
+function barsRegion(bars) {
+  const bar = barLenNow()
+  const dur = track.duration
+  if (dur <= bar) return { start: 0, end: dur }
+  const start = clamp(gridOriginNow(), 0, Math.max(0, dur - 0.01))
+  const limit = dur - Math.min(0.25, bar * 0.5)
+  const fit = Math.max(0, Math.floor((limit - start) / bar + 1e-6))
+  let end = start + Math.min(bars, fit) * bar
+  if (!(end > start + 1e-6)) end = dur
+  return { start, end }
+}
+
+/** Make a region audible and looped, keeping playback as coherent as possible. */
+function setLoopRegion(start, end) {
+  if (!track) return false
+  const srcTime = currentSourceTime()
+  const wasPlaying = engine.playing
+  const s = clamp(start, 0, track.duration)
+  const e = clamp(end, 0, track.duration)
+  if (!(e - s > 0.01)) return false
+  loop.start = s
+  loop.end = e
+  engine.pause()
+  bakeNow()
+  loop.enabled = true
+  el.loop.checked = true
+  applyLoopBuffer(srcTime, wasPlaying)
+  renderControls()
+  redraw()
+  return true
+}
+
+/** Show the loop with a little context on either side. */
+function frameLoop() {
+  if (!track) return
+  const bar = barLenNow()
+  const start = clamp(loop.start - bar * 0.5, 0, track.duration)
+  const end = clamp(loop.end + bar * 0.5, 0, track.duration)
+  view.setWindow(start, end)
+  updateZoomInfo()
+}
+
+/**
+ * Put a short bar-aligned loop on the first measured downbeat. This is the
+ * first-run demo: pressing play repeats a bar-fitted region, so a wrong grid
+ * is something you hear instead of something you have to imagine.
+ */
+function armFirstLoop() {
+  if (!track || loopTouched) return
+  const { start, end } = barsRegion(4)
+  // fade the restarted head in under the outgoing tail for a few ms: the grid
+  // lands on the onset's peak, a few ms into the attack, so a hard cut clicks.
+  // outPre stays 0 on purpose - fading the region's own tail to zero before the
+  // post-roll takes over is itself a discontinuity
+  loop.inPostMs = 10
+  syncEnvelopeUi()
+  if (!setLoopRegion(start, end)) return
+  if (!viewTouched) frameLoop()
+  redraw()
+}
+
 function saveBpm() { try { localStorage.setItem(BPM_KEY, String(bpm)) } catch {} }
 
 function syncTempoUi() {
   el.bpm.value = bpm.toFixed(2)
   el.barLenInfo.textContent = `${barLenNow().toFixed(3)} s/bar`
+}
+
+/** Say where the tempo came from, next to the number it describes. */
+function syncTempoMeta() {
+  if (!el.tempoTag) return
+  let label = ''
+  let kind = ''
+  let note = 'Measured from the file you load.'
+  if (track) {
+    if (tempoSource === 'pending') {
+      label = 'measuring'
+      kind = 'auto'
+      note = 'Listening for the tempo…'
+    } else if (tempoSource === 'auto') {
+      label = 'auto'
+      kind = 'auto'
+      note = tempoUncertain
+        ? 'Measured, but the downbeat is a guess — check the bar lines.'
+        : 'Measured from this file.'
+    } else if (tempoSource === 'failed') {
+      label = 'not measured'
+      kind = 'bad'
+      note = 'Could not measure this file — type the tempo in, then enable the loop.'
+    } else if (tempoSource === 'preset') {
+      label = 'preset'
+      note = 'From the preset.'
+    } else if (tempoSource === 'manual') {
+      label = 'set'
+      note = 'Set by hand.'
+    }
+  }
+  el.tempoTag.textContent = label
+  el.tempoTag.hidden = !label
+  el.tempoTag.className = label && kind ? `tag ${kind}` : 'tag'
+  el.tempoNote.textContent = note
+}
+
+function setTempoSource(next) {
+  tempoSource = next
+  syncTempoMeta()
+}
+
+/** The transport and the panel only mean something once a track is decoded. */
+function setUiLive(live) {
+  el.panel.inert = !live
+  el.transport.inert = !live
+  el.shortcuts.hidden = !live
+  el.firstRun.hidden = live
 }
 
 function setBpm(value, { snapLoop = true } = {}) {
@@ -321,6 +445,7 @@ function ensureBeatWorker() {
     beatWorker.onmessage = onAnalysis
     beatWorker.onerror = (e) => {
       beatWorker = null
+      setTempoSource('failed')
       setStatus(`tempo measurement failed: ${e.message || 'worker error'}`, 'error')
     }
   }
@@ -334,10 +459,10 @@ function startAnalysis(buffer) {
   syncTempoAlt()
   const samples = downmix(buffer)
   const id = ++analysisId
-  setStatus('measuring tempo…')
   try {
     ensureBeatWorker().postMessage({ samples: samples.buffer, sr: buffer.sampleRate, id }, [samples.buffer])
   } catch (err) {
+    setTempoSource('failed')
     setStatus(`tempo measurement failed: ${err.message || err}`, 'error')
   }
 }
@@ -347,6 +472,7 @@ function onAnalysis(e) {
   const data = e.data
   if (!data || data.id !== analysisId) return
   if (!data.ok) {
+    setTempoSource('failed')
     setStatus(`could not measure the tempo: ${data.reason}`, 'error')
     return
   }
@@ -360,15 +486,18 @@ function onAnalysis(e) {
     .map((c) => c.bpm)
     .filter((v) => Number.isFinite(v) && v >= 40 && v <= 240)
   syncTempoAlt()
-  if (tempoSource !== 'pending') return
-  applyDetectedTempo(data.bpm, data.gridOffsetMs)
-  tempoSource = 'auto'
-  const phase = data.downbeatMargin > 0.05 ? 'downbeat found' : 'bar phase unsure'
-  setStatus(`auto ${bpm.toFixed(2)} BPM · ${data.confidence.toFixed(1)}× onset strength · ${phase}`, 'ok')
+  // the user claimed the tempo while we were measuring: keep their numbers, but
+  // still give them the demo loop unless they have already placed one
+  if (tempoSource !== 'pending') { armFirstLoop(); return }
+  tempoUncertain = !(data.downbeatMargin > 0.05)
+  applyDetectedTempo(data.bpm, data.gridOffsetMs, { snapLoop: !loopTouched })
+  setTempoSource('auto')
+  setStatus('')
+  armFirstLoop()
 }
 
 /** Set tempo and grid together, then put the loop back on whole bars. */
-function applyDetectedTempo(nextBpm, nextGridMs) {
+function applyDetectedTempo(nextBpm, nextGridMs, { snapLoop = true } = {}) {
   bpm = clamp(nextBpm, 40, 240)
   gridMs = nextGridMs
   saveBpm()
@@ -378,10 +507,12 @@ function applyDetectedTempo(nextBpm, nextGridMs) {
   if (!track) return
   view.setBarLen(barLenNow())
   view.setGrid(gridOriginNow())
-  const s = snapBar(loop.start)
-  const e = Math.max(snapBar(loop.end), s + barLenNow())
-  loop.start = clamp(s, 0, track.duration)
-  loop.end = clamp(e, 0, track.duration)
+  if (snapLoop) {
+    const s = snapBar(loop.start)
+    const e = Math.max(snapBar(loop.end), s + barLenNow())
+    loop.start = clamp(s, 0, track.duration)
+    loop.end = clamp(e, 0, track.duration)
+  }
   updateZoomInfo()
   rebake()
   updateMeta()
@@ -392,19 +523,24 @@ function applyDetectedTempo(nextBpm, nextGridMs) {
  *  half-time or three-against-two reading gets corrected. */
 function syncTempoAlt() {
   if (!el.tempoAlt) return
-  const list = tempoCandidates.slice(0, 4)
-  el.tempoAlt.hidden = list.length < 2
+  const others = tempoCandidates
+    .slice(0, 4)
+    .filter((c) => Math.abs(c - bpm) > 0.06)
+  el.tempoAlt.hidden = others.length < 1
   if (el.tempoAltLabel) el.tempoAltLabel.hidden = el.tempoAlt.hidden
   el.tempoAlt.replaceChildren()
-  if (list.length < 2) return
-  for (const c of list) {
+  if (!others.length) return
+  const placeholder = document.createElement('option')
+  placeholder.value = ''
+  placeholder.textContent = 'other bpm'
+  el.tempoAlt.append(placeholder)
+  for (const c of others) {
     const option = document.createElement('option')
     option.value = String(c)
     option.textContent = c.toFixed(2)
     el.tempoAlt.append(option)
   }
-  const match = list.find((c) => Math.abs(c - bpm) < 0.06)
-  el.tempoAlt.value = match == null ? '' : String(match)
+  el.tempoAlt.value = ''
 }
 
 /** The grid beat nearest to t under the current tempo. */
@@ -471,7 +607,7 @@ function fitLoopToAudio() {
   updateZoomInfo()
   rebake()
   updateMeta()
-  tempoSource = 'manual'
+  setTempoSource('manual')
   syncTempoAlt()
   const weak = aligned < 0.5
   const loose = !tS.sure || !tE.sure
@@ -518,6 +654,9 @@ async function loadAudioFile(file) {
     track = { duration: buffer.duration, peaks }
     bpm = clamp(Number(localStorage.getItem(BPM_KEY)) || 120, 40, 240)
     gridMs = Number(localStorage.getItem(GRID_KEY)) || 0
+    loopTouched = false
+    viewTouched = false
+    tempoUncertain = false
     loop.enabled = false
     loop.inPreMs = 0
     loop.inPostMs = 0
@@ -535,16 +674,11 @@ async function loadAudioFile(file) {
     el.loop.checked = false
     syncEnvelopeUi()
 
-    // Default to whole bars, leaving a little tail after the last one.
-    const bar = barLenNow()
-    const origin = gridOriginNow()
-    const first = origin >= 0 ? origin : origin + Math.ceil(-origin / bar) * bar
-    const start = clamp(first, 0, track.duration)
-    const limit = track.duration - Math.min(0.25, bar * 0.5)
-    let end = start + Math.floor((limit - start) / bar + 1e-6) * bar
-    if (!(end > start + 1e-6)) end = track.duration
+    // A short region from the first bar line. It stays off until the tempo is
+    // measured, then armFirstLoop makes it audible.
+    const { start, end } = barsRegion(4)
     loop.start = start
-    loop.end = clamp(end, 0, track.duration)
+    loop.end = end
 
     engine.setBuffer(sourceBuffer)
     engine.setLoop(false)
@@ -554,11 +688,12 @@ async function loadAudioFile(file) {
     el.duration.textContent = fmt(track.duration)
     updateMeta()
     setPresetEnabled(true)
+    setUiLive(true)
     renderControls()
     redraw(0)
     setLoading(false)
     // measure after the UI is up; the result lands in onAnalysis
-    tempoSource = 'pending'
+    setTempoSource('pending')
     startAnalysis(buffer)
   } catch (err) {
     if (my !== loadToken) return
@@ -657,8 +792,9 @@ async function applyPreset() {
     if (l.enabled) setLoopEnabled(true)
     else { rebake(); redraw(loop.start) }
     updateMeta()
-    // the preset owns the tempo now; a late measurement must not replace it
-    tempoSource = 'preset'
+    // the preset owns the tempo and the loop now; a late measurement must not replace them
+    loopTouched = true
+    setTempoSource('preset')
     syncTempoAlt()
     el.presetDialog.close()
     setStatus('preset loaded', 'ok')
@@ -705,6 +841,7 @@ function handleNear(clientX) {
 
 el.timeline.addEventListener('pointerdown', (e) => {
   if (e.shiftKey && track) {
+    viewTouched = true
     panStart = { x: e.clientX, start: view.viewStart, end: view.viewEnd }
     el.timeline.setPointerCapture(e.pointerId)
     el.timeline.style.cursor = 'grabbing'
@@ -714,7 +851,9 @@ el.timeline.addEventListener('pointerdown', (e) => {
   el.timeline.setPointerCapture(e.pointerId)
   if (near) {
     drag = near
-    tempoSource = 'manual' // the user is placing the loop; a late measurement must not move it
+    // placing the loop claims the region, not the tempo: a late measurement
+    // may still set the BPM and bar lines, it just must not move this region
+    loopTouched = true
     return
   }
   scrubbing = true
@@ -771,14 +910,20 @@ function endPointer(e) {
 el.timeline.addEventListener('pointerup', endPointer)
 el.timeline.addEventListener('pointercancel', endPointer)
 
-function setGridMs(ms) {
+function setGridMs(ms, { snapLoop = false } = {}) {
   const delta = (ms - gridMs) / 1000
   gridMs = ms
   saveGrid()
   syncGridUi()
+  setTempoSource('manual')
   if (!track) return
   view.setGrid(gridOriginNow())
-  if (delta !== 0) {
+  if (snapLoop) {
+    const s = snapBar(loop.start)
+    const e = Math.max(snapBar(loop.end), s + minLoop())
+    loop.start = clamp(s, 0, track.duration)
+    loop.end = clamp(e, 0, track.duration)
+  } else if (delta !== 0) {
     let s = clamp(loop.start + delta, 0, track.duration)
     let e = clamp(loop.end + delta, 0, track.duration)
     if (e - s < minLoop()) e = Math.min(track.duration, s + minLoop())
@@ -796,9 +941,15 @@ el.gM1.addEventListener('click', () => nudgeBeats(-1))
 el.gP1.addEventListener('click', () => nudgeBeats(1))
 el.gP2.addEventListener('click', () => nudgeBeats(2))
 el.g0.addEventListener('click', () => setGridMs(0))
+el.setGridHere.addEventListener('click', () => {
+  if (!track) return
+  const t = clamp(currentSourceTime(), 0, track.duration)
+  setGridMs(t * 1000, { snapLoop: true })
+  setStatus(`bar 0 set at ${fmt(t)}`, 'ok')
+})
 el.gridMs.addEventListener('change', () => setGridMs(Number(el.gridMs.value) || 0))
 el.bpm.addEventListener('change', () => {
-  tempoSource = 'manual'
+  setTempoSource('manual')
   setBpm(Number(el.bpm.value))
 })
 
@@ -808,7 +959,7 @@ function scaleTempo(factor) {
   if (!track) return
   const next = clamp(bpm * factor, 40, 240)
   if (Math.abs(next - bpm) < 1e-6) { setStatus(`cannot scale ${bpm.toFixed(2)} BPM by ${factor}× inside 40–240`, 'error'); return }
-  tempoSource = 'manual'
+  setTempoSource('manual')
   setBpm(next)
   syncTempoAlt()
 }
@@ -817,14 +968,16 @@ el.bpmD2.addEventListener('click', () => scaleTempo(0.5))
 el.tempoAlt.addEventListener('change', () => {
   const next = Number(el.tempoAlt.value)
   if (!Number.isFinite(next) || next <= 0) return
-  tempoSource = 'manual'
+  setTempoSource('manual')
   setBpm(next)
+  syncTempoAlt()
 })
 
 el.fitLoop.addEventListener('click', fitLoopToAudio)
 
 el.timeline.addEventListener('wheel', (e) => {
   if (!track) return
+  viewTouched = true
   e.preventDefault()
   const rect = el.timeline.getBoundingClientRect()
   if (e.shiftKey) {
@@ -847,6 +1000,7 @@ function minimapTo(e) {
   redraw()
 }
 el.mini.addEventListener('pointerdown', (e) => {
+  viewTouched = true
   miniDrag = true
   el.mini.setPointerCapture(e.pointerId)
   minimapTo(e)
@@ -858,13 +1012,20 @@ el.mini.addEventListener('pointercancel', endMini)
 
 const zoomBy = (factor) => {
   if (!track) return
+  viewTouched = true
   view.zoomAt(view.viewStart + view.windowSpan() / 2, factor)
   updateZoomInfo()
   redraw()
 }
 el.zoomIn.addEventListener('click', () => zoomBy(1 / 1.5))
 el.zoomOut.addEventListener('click', () => zoomBy(1.5))
-el.zoomFit.addEventListener('click', () => { if (track) { view.setWindow(0, track.duration); updateZoomInfo(); redraw() } })
+el.zoomFit.addEventListener('click', () => {
+  if (!track) return
+  viewTouched = true
+  view.setWindow(0, track.duration)
+  updateZoomInfo()
+  redraw()
+})
 
 el.play.addEventListener('click', togglePlay)
 el.restart.addEventListener('click', () => seekSource(0))
@@ -909,7 +1070,15 @@ window.addEventListener('keydown', (e) => {
   if (e.key === ']') { e.preventDefault(); nudgeBeats(1) }
   if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomBy(1 / 1.5) }
   if (e.key === '-') { e.preventDefault(); zoomBy(1.5) }
-  if (e.key === '0') { e.preventDefault(); if (track) { view.setWindow(0, track.duration); updateZoomInfo(); redraw() } }
+  if (e.key === '0') {
+    e.preventDefault()
+    if (track) {
+      viewTouched = true
+      view.setWindow(0, track.duration)
+      updateZoomInfo()
+      redraw()
+    }
+  }
 })
 
 engine.onEnded = () => { renderControls(); redraw(currentSourceTime()) }
@@ -938,6 +1107,8 @@ function boot() {
   el.meta.textContent = 'load the audio file to begin'
   el.loading.textContent = 'choose audio · or drop a file'
   setLoading(true)
+  setUiLive(false)
+  syncTempoMeta()
   requestAnimationFrame(tick)
   window.__workbench = {
     engine,
@@ -955,6 +1126,9 @@ function boot() {
     get bpm() { return bpm },
     get tempoSource() { return tempoSource },
     get tempoCandidates() { return tempoCandidates.slice() },
+    get tempoUncertain() { return tempoUncertain },
+    get loopTouched() { return loopTouched },
+    get viewTouched() { return viewTouched },
     get heads() { return computeHeads(currentSourceTime()) },
     redraw,
     get viewSpan() { return view.windowSpan() },

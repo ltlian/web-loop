@@ -19,9 +19,14 @@ npm install
 npm run dev        # http://127.0.0.1:5180
 ```
 
-Click **load audio** or drop a file on the page. After the first decode the
-waveform and loop controls are live; loading another file replaces the track.
-Audio is decoded at runtime, so there is no asset build step.
+Click **load audio** or drop a file on the page. It is decoded, and the tempo is
+measured off the main thread. When the measurement lands the app arms a four-bar
+loop on the first bar line and zooms to it, so pressing play immediately shows
+what the tool is for — and whether the bar lines are right. Loading another file
+replaces the track. Audio is decoded at runtime, so there is no asset build step.
+
+Until a file is loaded the transport and the panel are inert: there is nothing
+to control and nothing to explain.
 
 ## What it does
 
@@ -29,10 +34,14 @@ Audio is decoded at runtime, so there is no asset build step.
   `AudioBuffer`; the minimap uses browser-computed peaks. With a loop, the
   waveform is a blue→amber gradient from the in-marker to the out-marker, its
   amplitude follows the fade envelopes, and the other marker's post-roll or
-  pre-roll waveform is projected where it will be heard.
+  pre-roll waveform is projected where it will be heard. With the loop off, the
+  region still shows as a dim band, so the toggle has a visible subject.
 - **Loop region** with draggable bar-snapped handles, click-to-seek and
-  space to play/pause. Grab a handle and hold `ctrl` (or `alt`) while dragging
-  to place it off the bar grid, in 1 ms steps.
+  space to play/pause. A four-bar region is armed automatically from the first
+  bar line, with a short 10 ms seam fade so a bar cut a few milliseconds into an
+  attack does not click; drag the handles or the fades to taste. Grab a handle
+  and hold `ctrl` (or `alt`) while dragging to place it off the bar grid, in
+  1 ms steps.
 - **Edge envelopes** with four sliders (0–3000 ms), equal-power or linear. The
   left marker fades in over `in pre → in post`; the right marker fades out over
   `out pre → out post`. The period is the loop region itself: the post-roll
@@ -40,17 +49,20 @@ Audio is decoded at runtime, so there is no asset build step.
   overlays the loop tail at the end. The crossfade window is the union of the
   four windows around the seam; the body is the region trimmed by the larger
   window on each side. Zero lengths are hard edges, and the author owns the
-  gain sum and any seam click. The readout reports the period, window, body and
-  seam step.
+  gain sum and any seam click. The readout under the panel reports the loop in
+  bars and seconds; the full period, window, body and seam numbers are in its
+  tooltip, and clipped windows or an audible seam are called out inline.
 - **Tempo**: measured from the audio on load, off the main thread. The
   analyser builds a spectral-flux onset envelope, takes the tempo by
   autocorrelation under a metrical prior, fits a fixed beat grid and picks the
   4/4 downbeat from low-band energy. The result lands as an editable BPM and a
-  grid offset. The candidate selector lists the metrical levels the measurement
-  could not separate, and `×2` / `÷2` correct half and double time. **fit loop**
-  re-aligns the grid and the loop to the beats nearest the two markers. Grid
-  nudge (`−2♩ … +2♩`, ms) and free placement with `ctrl`/`alt`-drag on a
-  handle.
+  grid offset. A tag beside the tempo says where the number came from —
+  `auto`, `set`, `preset`, `measuring` or `not measured` — and when the downbeat
+  was a guess it says so. The candidate selector lists the other measured
+  metrical levels, and `×2` / `÷2` correct half and double time. **fit loop to
+  beats** re-aligns the grid and the loop to the beats nearest the two markers.
+  **Bar lines** shift bar 0 in whole beats (`−2 … +2`, reset) or place it at the
+  playhead with **set here**; free placement is `ctrl`/`alt`-drag on a handle.
 - **Playheads**: white for the main position; amber for the post-roll stream and
   blue for the pre-roll stream while overlaid. The fade panels and handles use
   the same left-blue / right-amber coding.
@@ -59,7 +71,8 @@ Audio is decoded at runtime, so there is no asset build step.
 
 ## Copying and loading a preset
 
-**copy preset** puts the current configuration on the clipboard as JSON:
+**copy preset** and **load preset** sit in the panel header. **copy preset** puts
+the current configuration on the clipboard as JSON:
 
 ```json
 {
