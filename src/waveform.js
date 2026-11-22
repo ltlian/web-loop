@@ -523,7 +523,7 @@ export class WaveformView {
 
   drawMinimap(loop = null, position = null) {
     const c = this.mini
-    if (!c) return
+    if (!c || !this.buffer) return
     const rect = c.getBoundingClientRect()
     const dpr = Math.min(2, window.devicePixelRatio || 1)
     if (c.width !== Math.floor(rect.width * dpr) || c.height !== Math.floor(rect.height * dpr)) {
@@ -572,14 +572,18 @@ export class WaveformView {
     ctx.fillStyle = 'rgba(2,6,14,0.55)'
     ctx.fillRect(0, 0, x0, h)
     ctx.fillRect(x1, 0, w - x1, h)
-    // Interior window edges only: a full outline sits under the container's
-    // rounded corners and reads as a second, broken border.
+    // Vertical lines within the container's corner radius get clipped into
+    // stubs, so keep them out of that margin; the masks indicate the window and
+    // the main timeline carries the playhead.
+    const INSET = 8
+    // Interior window edges only: a full outline sits under the rounded corners
+    // and reads as a second, broken border.
     if (x1 - x0 < w - 1) {
       ctx.strokeStyle = 'rgba(248,250,252,0.45)'
       ctx.lineWidth = 1
       for (const x of [x0, x1]) {
         const px = Math.round(x) + 0.5
-        if (px < 1.5 || px > w - 1.5) continue
+        if (px < INSET || px > w - INSET) continue
         ctx.beginPath()
         ctx.moveTo(px, 0)
         ctx.lineTo(px, h)
@@ -589,8 +593,10 @@ export class WaveformView {
 
     if (position != null) {
       const xp = (position / dur) * w
-      ctx.strokeStyle = '#f8fafc'
-      ctx.beginPath(); ctx.moveTo(xp, 0); ctx.lineTo(xp, h); ctx.stroke()
+      if (xp >= INSET && xp <= w - INSET) {
+        ctx.strokeStyle = '#f8fafc'
+        ctx.beginPath(); ctx.moveTo(xp, 0); ctx.lineTo(xp, h); ctx.stroke()
+      }
     }
   }
 }
