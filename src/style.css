@@ -257,6 +257,15 @@ input[type="checkbox"] {
 
 .bpm-ctl input { width: 84px; }
 
+/* Tempo alternatives measured by the analyser; only shown when it found more
+   than one plausible metrical level. */
+select.tempo-alt {
+  padding: 3px 6px;
+  font-size: 12px;
+  border-radius: 6px;
+  max-width: 96px;
+}
+
 /* Edge sliders: label under the track keeps each pair narrow; the in pair sits
    left, the out pair right, and either wraps when the row cannot hold both. */
 .edges { gap: 12px; }

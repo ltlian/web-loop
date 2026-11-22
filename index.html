@@ -76,9 +76,12 @@
 
         <div class="loop-row ctl-row">
           <label class="ctl bpm-ctl">bpm
-            <input type="number" id="bpm" min="40" max="240" step="0.01" title="Effective tempo; beats the detected scalar when it is quantized" />
+            <input type="number" id="bpm" min="40" max="240" step="0.01" title="Effective tempo; measured from the audio when a file loads" />
             <span id="barLenInfo" class="dim"></span>
           </label>
+          <button class="mini" id="bpmD2" title="Halve the tempo (half-time reading)">÷2</button>
+          <button class="mini" id="bpmX2" title="Double the tempo (double-time reading)">×2</button>
+          <select id="tempoCandidates" class="tempo-alt" title="Tempo alternatives measured from this track" hidden></select>
           <span class="ctl grid-ctl">grid
             <button class="mini" id="gM2" title="Shift grid 2 beats earlier">−2♩</button>
             <button class="mini" id="gM1" title="Shift grid 1 beat earlier">−1♩</button>
@@ -88,7 +91,7 @@
             <input type="number" id="gridMs" step="5" value="0" title="Grid offset in ms" />
             <span id="gridVal" class="dim">0 ms</span>
           </span>
-          <button class="mini" id="fitLoop" title="Fit BPM and grid phase to the audio at both loop ends">fit loop</button>
+          <button class="mini" id="fitLoop" title="Align the grid and the loop to the beats nearest the loop ends">fit loop</button>
           <label class="ctl">curve
             <select id="curve">
               <option value="equal-power">equal-power</option>

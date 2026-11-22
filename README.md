@@ -41,9 +41,14 @@ Audio is decoded at runtime, so there is no asset build step.
   window on each side. Zero lengths are hard edges, and the author owns the
   gain sum and any seam click. The readout reports the period, window, body and
   seam step.
-- **Tempo**: starts at 120 BPM and is editable and persisted. **fit loop**
-  recalibrates tempo and phase from onsets at both loop ends. Grid nudge
-  (`−2♩ … +2♩`, ms) and free placement with `alt`-drag.
+- **Tempo**: measured from the audio on load, off the main thread. The
+  analyser builds a spectral-flux onset envelope, takes the tempo by
+  autocorrelation under a metrical prior, fits a fixed beat grid and picks the
+  4/4 downbeat from low-band energy. The result lands as an editable BPM and a
+  grid offset. The candidate selector lists the metrical levels the measurement
+  could not separate, and `×2` / `÷2` correct half and double time. **fit loop**
+  re-aligns the grid and the loop to the beats nearest the two markers. Grid
+  nudge (`−2♩ … +2♩`, ms) and free placement with `alt`-drag.
 - **Playheads**: white for the main position; amber for the post-roll stream and
   blue for the pre-roll stream while overlaid. The fade panels and handles use
   the same left-blue / right-amber coding.
@@ -80,4 +85,6 @@ rebakes. Invalid JSON leaves the current state untouched. The audio file is not
 part of the preset.
 
 BPM and grid offset are remembered in the browser under the `web-loop.bpm` and
-`web-loop.gridOffsetMs` localStorage keys. They are not stored per file.
+`web-loop.gridOffsetMs` localStorage keys. They are the fallback for a track the
+analyser cannot measure: when it succeeds, the measured tempo and grid replace
+them. They are not stored per file.

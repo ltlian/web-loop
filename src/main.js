@@ -5,6 +5,7 @@ import { bakeLoop } from './loopbake.js'
 import { computePeaks } from './peaks.js'
 import { createFileDrop } from './file-drop.js'
 import { buildPreset, PRESET_FORMAT } from './preset.js'
+import { findOnsetNear } from './beats.js'
 
 const $ = (id) => document.getElementById(id)
 const el = {
@@ -16,6 +17,7 @@ const el = {
   outPre: $('outPre'), outPreVal: $('outPreVal'), outPost: $('outPost'), outPostVal: $('outPostVal'),
   curve: $('curve'), loopInfo: $('loopInfo'),
   bpm: $('bpm'), barLenInfo: $('barLenInfo'), fitLoop: $('fitLoop'),
+  bpmX2: $('bpmX2'), bpmD2: $('bpmD2'), tempoAlt: $('tempoCandidates'),
   gridMs: $('gridMs'), gridVal: $('gridVal'), gM2: $('gM2'), gM1: $('gM1'), gP1: $('gP1'), gP2: $('gP2'), g0: $('g0'),
   mini: $('minimap'), zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomFit: $('zoomFit'), zoomInfo: $('zoomInfo'),
   loadAudio: $('loadAudio'), audioFile: $('audioFile'),
@@ -38,6 +40,19 @@ let lastDrawn = -1
 let envelopeTimer = 0
 let gridMs = 0
 let bpm = 120
+// where the current tempo came from: 'default' | 'pending' | 'auto' | 'manual' | 'preset'.
+// A measurement only lands while it is still 'pending', so a preset or a user
+// edit is never overwritten by a late worker result.
+let tempoSource = 'default'
+let tempoCandidates = []
+let analysisId = 0
+let beatWorker = null
+// onset envelope of the current track, measured by the worker and reused by
+// fit loop; null until the analysis lands or when it could not run.
+let beatEnv = null
+let beatFps = 0
+let beatOffset = 0
+let beatEnvMean = 0
 let miniDrag = false
 let panStart = null
 const GRID_KEY = 'web-loop.gridOffsetMs'
@@ -285,50 +300,166 @@ function setBpm(value, { snapLoop = true } = {}) {
   updateZoomInfo()
   rebake()
   updateMeta()
+  syncTempoAlt()
 }
 
-/** Onset (attack) time near t, using a 150 Hz low-band energy rise. */
-function findOnsetNear(buffer, t, radius = 0.15) {
-  const sr = buffer.sampleRate
-  const ch = buffer.getChannelData(0)
-  const a = 1 - Math.exp((-2 * Math.PI * 150) / sr)
-  const pre = Math.round(0.06 * sr)
-  const start = Math.max(0, Math.floor((t - radius) * sr))
-  const end = Math.min(ch.length, Math.floor((t + radius) * sr))
-  let lp = 0
-  for (let i = Math.max(0, start - pre); i < start; i++) lp += a * (ch[i] - lp)
-  const frame = Math.max(1, Math.round(0.002 * sr))
-  const times = [], energy = []
-  for (let i = start; i < end; i += frame) {
-    let e = 0, c = 0
-    for (let j = i; j < Math.min(end, i + frame); j++) { lp += a * (ch[j] - lp); e += lp * lp; c++ }
-    times.push((i + frame / 2) / sr)
-    energy.push(e / (c || 1))
+/** Downmix to mono for analysis; playback keeps the original buffer. */
+function downmix(buffer) {
+  const n = buffer.length
+  const out = new Float32Array(n)
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const d = buffer.getChannelData(c)
+    for (let i = 0; i < n; i++) out[i] += d[i]
   }
-  let bestT = t, best = -Infinity
-  const lag = 5
-  for (let i = lag; i < energy.length; i++) {
-    const s = energy[i] - energy[i - lag]
-    if (s > best) { best = s; bestT = times[i] }
-  }
-  return bestT
+  const gain = 1 / Math.max(1, buffer.numberOfChannels)
+  for (let i = 0; i < n; i++) out[i] *= gain
+  return out
 }
 
-/** Fit BPM + grid phase so both loop boundaries sit on the detected onsets. */
+function ensureBeatWorker() {
+  if (!beatWorker) {
+    beatWorker = new Worker(new URL('./beats.worker.js', import.meta.url), { type: 'module' })
+    beatWorker.onmessage = onAnalysis
+    beatWorker.onerror = (e) => {
+      beatWorker = null
+      setStatus(`tempo measurement failed: ${e.message || 'worker error'}`, 'error')
+    }
+  }
+  return beatWorker
+}
+
+/** Measure the track in the background; the result lands in onAnalysis. */
+function startAnalysis(buffer) {
+  beatEnv = null
+  tempoCandidates = []
+  syncTempoAlt()
+  const samples = downmix(buffer)
+  const id = ++analysisId
+  setStatus('measuring tempo…')
+  try {
+    ensureBeatWorker().postMessage({ samples: samples.buffer, sr: buffer.sampleRate, id }, [samples.buffer])
+  } catch (err) {
+    setStatus(`tempo measurement failed: ${err.message || err}`, 'error')
+  }
+}
+
+/** Adopt the measurement only while the tempo is still unclaimed. */
+function onAnalysis(e) {
+  const data = e.data
+  if (!data || data.id !== analysisId) return
+  if (!data.ok) {
+    setStatus(`could not measure the tempo: ${data.reason}`, 'error')
+    return
+  }
+  beatEnv = data.env
+  beatFps = data.fps
+  beatOffset = data.offset
+  let sum = 0
+  for (const v of beatEnv) sum += v
+  beatEnvMean = beatEnv.length ? sum / beatEnv.length : 0
+  tempoCandidates = (data.candidates || [])
+    .map((c) => c.bpm)
+    .filter((v) => Number.isFinite(v) && v >= 40 && v <= 240)
+  syncTempoAlt()
+  if (tempoSource !== 'pending') return
+  applyDetectedTempo(data.bpm, data.gridOffsetMs)
+  tempoSource = 'auto'
+  const phase = data.downbeatMargin > 0.05 ? 'downbeat found' : 'bar phase unsure'
+  setStatus(`auto ${bpm.toFixed(2)} BPM · ${data.confidence.toFixed(1)}× onset strength · ${phase}`, 'ok')
+}
+
+/** Set tempo and grid together, then put the loop back on whole bars. */
+function applyDetectedTempo(nextBpm, nextGridMs) {
+  bpm = clamp(nextBpm, 40, 240)
+  gridMs = nextGridMs
+  saveBpm()
+  saveGrid()
+  syncTempoUi()
+  syncGridUi()
+  if (!track) return
+  view.setBarLen(barLenNow())
+  view.setGrid(gridOriginNow())
+  const s = snapBar(loop.start)
+  const e = Math.max(snapBar(loop.end), s + barLenNow())
+  loop.start = clamp(s, 0, track.duration)
+  loop.end = clamp(e, 0, track.duration)
+  updateZoomInfo()
+  rebake()
+  updateMeta()
+  redraw()
+}
+
+/** Offer the tempos that competed with the measurement; picking one is how a
+ *  half-time or three-against-two reading gets corrected. */
+function syncTempoAlt() {
+  if (!el.tempoAlt) return
+  const list = tempoCandidates.slice(0, 4)
+  el.tempoAlt.hidden = list.length < 2
+  el.tempoAlt.replaceChildren()
+  if (list.length < 2) return
+  for (const c of list) {
+    const option = document.createElement('option')
+    option.value = String(c)
+    option.textContent = c.toFixed(2)
+    el.tempoAlt.append(option)
+  }
+  const match = list.find((c) => Math.abs(c - bpm) < 0.06)
+  el.tempoAlt.value = match == null ? '' : String(match)
+}
+
+/** The grid beat nearest to t under the current tempo. */
+function nearestBeat(t, beatLen) {
+  return gridOriginNow() + Math.round((t - gridOriginNow()) / beatLen) * beatLen
+}
+
+/**
+ * Onset at the beat nearest a marker. The search is guided by the grid on
+ * purpose: a pickup can be louder than the bar line, so the loudest transient
+ * in a wide window is the wrong answer even though it looks right.
+ */
+function onsetForMarker(t, beatLen) {
+  const pred = nearestBeat(t, beatLen)
+  const floor = beatEnvMean * 0.5
+  const narrow = findOnsetNear(beatEnv, beatFps, pred, 0.03, { offset: beatOffset, floor })
+  if (narrow.found) return { ...narrow, sure: true }
+  const wide = findOnsetNear(beatEnv, beatFps, pred, 0.09, { offset: beatOffset, floor })
+  return wide.found ? { ...wide, sure: false } : { found: false }
+}
+
+/** Fit BPM + grid phase so both loop boundaries sit on measured onsets. */
 function fitLoopToAudio() {
   if (!track || !sourceBuffer) return
   if (!loop.enabled) { setStatus('enable Loop region first'); return }
+  if (!beatEnv) { setStatus('tempo analysis is still running — try again in a moment'); return }
   const startBar = barsAt(loop.start)
   const endBar = barsAt(loop.end)
   const nBars = Math.max(1, Math.round(endBar - startBar))
-  const tS = findOnsetNear(sourceBuffer, loop.start)
-  const tE = findOnsetNear(sourceBuffer, loop.end)
-  if (!(tE > tS + nBars * 0.1)) { setStatus('could not find onsets at both loop ends'); return }
-  bpm = clamp((240 * nBars) / (tE - tS), 40, 240)
+  const tS = onsetForMarker(loop.start, 60 / bpm)
+  const tE = onsetForMarker(loop.end, 60 / bpm)
+  if (!tS.found || !tE.found) {
+    setStatus('no clear beat near a loop end — nudge the marker and try again', 'error')
+    return
+  }
+  if (!(tE.time > tS.time + nBars * 0.1)) {
+    setStatus('the two loop ends are too close to fit a tempo', 'error')
+    return
+  }
+  const fitted = clamp((240 * nBars) / (tE.time - tS.time), 40, 240)
+  // a two-point fit always hits its endpoints; check the beats in between
+  const beatLen = 60 / fitted
+  const floor = beatEnvMean * 0.5
+  let hits = 0
+  const total = Math.max(0, nBars * 4 - 1)
+  for (let k = 1; k < nBars * 4; k++) {
+    const at = findOnsetNear(beatEnv, beatFps, tS.time + k * beatLen, 0.03, { offset: beatOffset, floor })
+    if (at.found) hits++
+  }
+  const aligned = total ? hits / total : 1
+  bpm = fitted
   saveBpm()
   const bl = barLenNow()
   const k = Math.round(startBar)
-  gridMs = (tS - k * bl) * 1000
+  gridMs = (tS.time - k * bl) * 1000
   saveGrid()
   syncGridUi()
   const g = gridOriginNow()
@@ -340,7 +471,15 @@ function fitLoopToAudio() {
   updateZoomInfo()
   rebake()
   updateMeta()
-  setStatus(`fitted ${bpm.toFixed(2)} BPM · ${nBars} bars · ${(loop.end - loop.start).toFixed(3)} s`, 'ok')
+  tempoSource = 'manual'
+  syncTempoAlt()
+  const weak = aligned < 0.5
+  const loose = !tS.sure || !tE.sure
+  const notes = []
+  if (weak) notes.push(`⚠ only ${Math.round(aligned * 100)}% of interior beats line up`)
+  if (loose) notes.push('⚠ weak onset near a loop end')
+  const note = notes.length ? ` · ${notes.join(' · ')}` : ''
+  setStatus(`fitted ${bpm.toFixed(2)} BPM · ${nBars} bars · ${(loop.end - loop.start).toFixed(3)} s${note}`, weak ? 'error' : 'ok')
 }
 
 function setPresetEnabled(on) {
@@ -418,6 +557,9 @@ async function loadAudioFile(file) {
     renderControls()
     redraw(0)
     setLoading(false)
+    // measure after the UI is up; the result lands in onAnalysis
+    tempoSource = 'pending'
+    startAnalysis(buffer)
   } catch (err) {
     if (my !== loadToken) return
     setStatus(`could not load ${file.name}: ${err.message || err}`, 'error')
@@ -515,6 +657,9 @@ async function applyPreset() {
     if (l.enabled) setLoopEnabled(true)
     else { rebake(); redraw(loop.start) }
     updateMeta()
+    // the preset owns the tempo now; a late measurement must not replace it
+    tempoSource = 'preset'
+    syncTempoAlt()
     el.presetDialog.close()
     setStatus('preset loaded', 'ok')
   } catch (err) {
@@ -569,6 +714,7 @@ el.timeline.addEventListener('pointerdown', (e) => {
   el.timeline.setPointerCapture(e.pointerId)
   if (near) {
     drag = near
+    tempoSource = 'manual' // the user is placing the loop; a late measurement must not move it
     return
   }
   scrubbing = true
@@ -648,7 +794,30 @@ el.gP1.addEventListener('click', () => nudgeBeats(1))
 el.gP2.addEventListener('click', () => nudgeBeats(2))
 el.g0.addEventListener('click', () => setGridMs(0))
 el.gridMs.addEventListener('change', () => setGridMs(Number(el.gridMs.value) || 0))
-el.bpm.addEventListener('change', () => setBpm(Number(el.bpm.value)))
+el.bpm.addEventListener('change', () => {
+  tempoSource = 'manual'
+  setBpm(Number(el.bpm.value))
+})
+
+/** Metrical corrections: the measurement cannot always tell 128 from 64 or
+ *  from 85, so offer the two most common moves and the candidates themselves. */
+function scaleTempo(factor) {
+  if (!track) return
+  const next = clamp(bpm * factor, 40, 240)
+  if (Math.abs(next - bpm) < 1e-6) { setStatus(`cannot scale ${bpm.toFixed(2)} BPM by ${factor}× inside 40–240`, 'error'); return }
+  tempoSource = 'manual'
+  setBpm(next)
+  syncTempoAlt()
+}
+el.bpmX2.addEventListener('click', () => scaleTempo(2))
+el.bpmD2.addEventListener('click', () => scaleTempo(0.5))
+el.tempoAlt.addEventListener('change', () => {
+  const next = Number(el.tempoAlt.value)
+  if (!Number.isFinite(next) || next <= 0) return
+  tempoSource = 'manual'
+  setBpm(next)
+})
+
 el.fitLoop.addEventListener('click', fitLoopToAudio)
 
 el.timeline.addEventListener('wheel', (e) => {
@@ -781,6 +950,8 @@ function boot() {
     get gridMs() { return gridMs },
     get gridOrigin() { return gridOriginNow() },
     get bpm() { return bpm },
+    get tempoSource() { return tempoSource },
+    get tempoCandidates() { return tempoCandidates.slice() },
     get heads() { return computeHeads(currentSourceTime()) },
     redraw,
     get viewSpan() { return view.windowSpan() },

@@ -5,6 +5,8 @@ points in a track and hearing seam alternatives.
 
 - `src/main.js` — state machine, controls; exposes `window.__workbench`.
 - `src/preset.js` — preset JSON emitter; schema lives in `public/preset.schema.json`.
+- `src/beats.js` — onset envelope, tempo, beat grid and downbeat; pure functions.
+- `src/beats.worker.js` — runs `beats.js` off the main thread.
 - `src/waveform.js` — gradient detail waveform + projected cross-source + overlay.
 - `src/peaks.js` — downmixed min/max buckets for the minimap.
 - `src/loopbake.js` — seam baker.
