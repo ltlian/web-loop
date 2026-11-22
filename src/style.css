@@ -174,6 +174,27 @@ input[type="checkbox"] {
   pointer-events: none;
 }
 
+/* Between decode and the measurement the waveform is real but the grid is
+   still a guess; a veil and a sweeping highlight say "not ready yet". */
+.loading.analyzing {
+  background-color: rgba(7, 11, 18, 0.45);
+  background-image: linear-gradient(105deg, transparent 40%, rgba(125, 211, 252, 0.14) 50%, transparent 60%);
+  background-repeat: no-repeat;
+  background-size: 220% 100%;
+  color: var(--text);
+  cursor: default;
+  animation: analyzing-sweep 1.7s linear infinite;
+}
+
+@keyframes analyzing-sweep {
+  from { background-position: 160% 0; }
+  to { background-position: -60% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading.analyzing { animation: none; }
+}
+
 .overview {
   height: 34px;
   margin-top: 8px;
@@ -182,9 +203,13 @@ input[type="checkbox"] {
   border-radius: 8px;
   background: var(--panel);
   cursor: default;
+  transition: opacity 0.15s;
 }
 
 .overview.is-live { cursor: grab; }
+
+/* While a file is decoding or its tempo is being measured. */
+.overview.is-busy { opacity: 0.55; }
 
 .overview canvas {
   display: block;

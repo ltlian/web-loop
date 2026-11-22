@@ -393,12 +393,25 @@ function setTempoSource(next) {
 }
 
 /** The transport and the panel only mean something once a track is decoded. */
-function setUiLive(live) {
+function setControlsLive(live) {
   el.panel.inert = !live
   el.transport.inert = !live
   el.overview.classList.toggle('is-live', live)
+}
+
+function setUiLive(live) {
+  setControlsLive(live)
   el.shortcuts.hidden = !live
   el.firstRun.hidden = live
+}
+
+/** The measurement is over; hand the app back to the user. */
+function finishAnalysis() {
+  el.loading.classList.remove('analyzing')
+  el.overview.classList.remove('is-busy')
+  setLoading(false)
+  setUiLive(true)
+  updateMeta()
 }
 
 function setBpm(value, { snapLoop = true } = {}) {
@@ -441,6 +454,7 @@ function ensureBeatWorker() {
       beatWorker = null
       setTempoSource('failed')
       setStatus(`tempo measurement failed: ${e.message || 'worker error'}`, 'error')
+      finishAnalysis()
     }
   }
   return beatWorker
@@ -457,6 +471,7 @@ function startAnalysis(buffer) {
   } catch (err) {
     setTempoSource('failed')
     setStatus(`tempo measurement failed: ${err.message || err}`, 'error')
+    finishAnalysis()
   }
 }
 
@@ -467,6 +482,7 @@ function onAnalysis(e) {
   if (!data.ok) {
     setTempoSource('failed')
     setStatus(`could not measure the tempo: ${data.reason}`, 'error')
+    finishAnalysis()
     return
   }
   tempoCandidates = (data.candidates || [])
@@ -475,12 +491,13 @@ function onAnalysis(e) {
   syncTempoAlt()
   // the user claimed the tempo while we were measuring: keep their numbers, but
   // still give them the demo loop unless they have already placed one
-  if (tempoSource !== 'pending') { armFirstLoop(); return }
+  if (tempoSource !== 'pending') { armFirstLoop(); finishAnalysis(); return }
   tempoUncertain = !(data.downbeatMargin > 0.05)
-  applyDetectedTempo(data.bpm, data.gridOffsetMs, { snapLoop: !loopTouched })
   setTempoSource('auto')
+  applyDetectedTempo(data.bpm, data.gridOffsetMs, { snapLoop: !loopTouched })
   setStatus('')
   armFirstLoop()
+  finishAnalysis()
 }
 
 /** Set tempo and grid together, then put the loop back on whole bars. */
@@ -537,9 +554,14 @@ function setPresetEnabled(on) {
 
 function updateMeta() {
   if (!track) return
+  const prefix = sourceName ? `${sourceName} · ` : ''
+  // never claim a tempo (cached from the last file) while this one is unmeasured
+  if (tempoSource === 'pending') {
+    el.meta.textContent = `${prefix}${track.duration.toFixed(2)} s · measuring tempo…`
+    return
+  }
   const first = Math.max(0, gridOriginNow())
   const bars = track.duration > first ? (track.duration - first) / barLenNow() : 0
-  const prefix = sourceName ? `${sourceName} · ` : ''
   el.meta.textContent = `${prefix}${bpm.toFixed(2)} BPM · ${barLenNow().toFixed(3)} s/bar · ${bars.toFixed(2)} bars · ${track.duration.toFixed(2)} s`
 }
 
@@ -553,7 +575,10 @@ async function loadAudioFile(file) {
   if (!file) return
   const my = ++loadToken
   setStatus('')
+  setControlsLive(false)
+  el.overview.classList.add('is-busy')
   setLoading(true)
+  el.loading.classList.remove('analyzing')
   el.loading.textContent = 'decoding…'
   try {
     const buffer = await engine.decode(await file.arrayBuffer())
@@ -598,20 +623,29 @@ async function loadAudioFile(file) {
     updateZoomInfo()
     bakeNow()
     el.duration.textContent = fmt(track.duration)
+    // the track is decoded but the grid is not measured yet: keep the overlay
+    // up and the controls inert so the app does not look ready to use
+    setTempoSource('pending')
     updateMeta()
     setPresetEnabled(true)
-    setUiLive(true)
     renderControls()
     redraw(0)
-    setLoading(false)
-    // measure after the UI is up; the result lands in onAnalysis
-    setTempoSource('pending')
+    el.loading.textContent = 'measuring tempo…'
+    el.loading.classList.add('analyzing')
     startAnalysis(buffer)
   } catch (err) {
     if (my !== loadToken) return
     setStatus(`could not load ${file.name}: ${err.message || err}`, 'error')
-    if (track) setLoading(false)
-    else { el.loading.textContent = 'choose audio · or drop a file'; setLoading(true) }
+    el.loading.classList.remove('analyzing')
+    el.overview.classList.remove('is-busy')
+    if (track) {
+      setLoading(false)
+      setUiLive(true)
+    } else {
+      el.loading.textContent = 'choose audio · or drop a file'
+      setLoading(true)
+      setUiLive(false)
+    }
   }
 }
 

@@ -25,8 +25,10 @@ loop on the first bar line and zooms to it, so pressing play immediately shows
 what the tool is for — and whether the bar lines are right. Loading another file
 replaces the track. Audio is decoded at runtime, so there is no asset build step.
 
-Until a file is loaded the transport and the panel are inert: there is nothing
-to control and nothing to explain.
+The transport and the panel stay inert until the measurement lands — first there
+is no track, then the grid is still being measured. In between, a veiled
+*measuring tempo…* shimmer sits over the decoded waveform, and the header reports
+the file's duration rather than a tempo it has not measured yet.
 
 ## What it does
 
