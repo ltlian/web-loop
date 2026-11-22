@@ -31,7 +31,8 @@ Audio is decoded at runtime, so there is no asset build step.
   amplitude follows the fade envelopes, and the other marker's post-roll or
   pre-roll waveform is projected where it will be heard.
 - **Loop region** with draggable bar-snapped handles, click-to-seek and
-  space to play/pause.
+  space to play/pause. Grab a handle and hold `ctrl` (or `alt`) while dragging
+  to place it off the bar grid, in 1 ms steps.
 - **Edge envelopes** with four sliders (0–3000 ms), equal-power or linear. The
   left marker fades in over `in pre → in post`; the right marker fades out over
   `out pre → out post`. The period is the loop region itself: the post-roll
@@ -48,7 +49,8 @@ Audio is decoded at runtime, so there is no asset build step.
   grid offset. The candidate selector lists the metrical levels the measurement
   could not separate, and `×2` / `÷2` correct half and double time. **fit loop**
   re-aligns the grid and the loop to the beats nearest the two markers. Grid
-  nudge (`−2♩ … +2♩`, ms) and free placement with `alt`-drag.
+  nudge (`−2♩ … +2♩`, ms) and free placement with `ctrl`/`alt`-drag on a
+  handle.
 - **Playheads**: white for the main position; amber for the post-roll stream and
   blue for the pre-roll stream while overlaid. The fade panels and handles use
   the same left-blue / right-amber coding.

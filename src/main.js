@@ -216,7 +216,7 @@ function updateZoomInfo() {
 
 function snapBar(t, free = false) {
   if (!track) return t
-  if (free) return clamp(Math.round(t * 20) / 20, 0, track.duration)
+  if (free) return clamp(Math.round(t * 1000) / 1000, 0, track.duration)
   const b = barLenNow()
   const g = gridOriginNow()
   return clamp(g + Math.round((t - g) / b) * b, 0, track.duration)
@@ -736,7 +736,10 @@ el.timeline.addEventListener('pointermove', (e) => {
   }
   if (drag) {
     const rect = el.timeline.getBoundingClientRect()
-    const t = snapBar(view.timeForX(e.clientX - rect.left), e.altKey)
+    // ctrl as well as alt: many Linux window managers claim alt-drag to move
+    // the window, so the page never sees it
+    const free = e.altKey || e.ctrlKey || e.metaKey
+    const t = snapBar(view.timeForX(e.clientX - rect.left), free)
     if (drag === 'start') loop.start = clamp(t, 0, loop.end - minLoop())
     else loop.end = clamp(t, loop.start + minLoop(), track.duration)
     updateLoopInfo()
