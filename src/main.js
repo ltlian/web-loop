@@ -23,7 +23,7 @@ const el = {
   setGridHere: $('setGridHere'),
   mini: $('minimap'), zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomFit: $('zoomFit'), zoomInfo: $('zoomInfo'),
   loadAudio: $('loadAudio'), audioFile: $('audioFile'),
-  panel: $('panel'), transport: $('transport'), shortcuts: $('shortcuts'), firstRun: $('firstRun'),
+  panel: $('panel'), transport: $('transport'), overview: $('overview'), shortcuts: $('shortcuts'), firstRun: $('firstRun'),
   copyPreset: $('copyPreset'), loadPreset: $('loadPreset'),
   presetDialog: $('presetDialog'), presetText: $('presetText'), presetError: $('presetError'),
   cancelPreset: $('cancelPreset'), applyPreset: $('applyPreset'),
@@ -403,6 +403,7 @@ function setTempoSource(next) {
 function setUiLive(live) {
   el.panel.inert = !live
   el.transport.inert = !live
+  el.overview.classList.toggle('is-live', live)
   el.shortcuts.hidden = !live
   el.firstRun.hidden = live
 }

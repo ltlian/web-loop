@@ -181,8 +181,10 @@ input[type="checkbox"] {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
-  cursor: grab;
+  cursor: default;
 }
+
+.overview.is-live { cursor: grab; }
 
 .overview canvas {
   display: block;
@@ -242,12 +244,6 @@ input[type="checkbox"] {
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
-}
-
-.panel-tools {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
 }
 
 .groups {
@@ -383,7 +379,7 @@ button.wide { width: 100%; }
   cursor: pointer;
 }
 
-.bar-tools { gap: 10px; }
+.bar-tools { gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* Tempo alternatives measured by the analyser; only shown when it found more
    than one plausible metrical level. */
@@ -407,6 +403,12 @@ select.tempo-alt {
 
 @media (max-width: 720px) {
   .groups { grid-template-columns: 1fr; }
+}
+
+/* Keep the three header actions on one row on a phone. */
+@media (max-width: 520px) {
+  .bar-tools { gap: 6px; }
+  .bar-tools button { padding: 7px 9px; font-size: 13px; }
 }
 
 /* ── Footer ─────────────────────────────────────────────────────────────── */

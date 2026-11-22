@@ -15,6 +15,8 @@
           <p id="meta">no audio loaded</p>
         </div>
         <div class="bar-tools">
+          <button id="copyPreset" disabled title="Copy this track's BPM, bar offset and loop envelope as JSON">copy preset</button>
+          <button id="loadPreset" disabled title="Load a preset JSON pasted into a dialog">load preset</button>
           <button id="loadAudio" title="Choose the source audio file. It is decoded locally in the browser and never uploaded.">load audio</button>
           <input type="file" id="audioFile" accept="audio/*,.wav,.mp3,.flac,.ogg,.opus,.m4a,.aac" hidden />
         </div>
@@ -52,10 +54,6 @@
           </label>
           <span class="chip" id="loopIn">in —</span>
           <span class="chip" id="loopOut">out —</span>
-          <div class="panel-tools">
-            <button class="mini" id="copyPreset" disabled title="Copy this track's BPM, bar offset and loop envelope as JSON">copy preset</button>
-            <button class="mini" id="loadPreset" disabled title="Load a preset JSON pasted into a dialog">load preset</button>
-          </div>
         </header>
 
         <div class="groups">

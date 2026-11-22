@@ -572,9 +572,20 @@ export class WaveformView {
     ctx.fillStyle = 'rgba(2,6,14,0.55)'
     ctx.fillRect(0, 0, x0, h)
     ctx.fillRect(x1, 0, w - x1, h)
-    ctx.strokeStyle = 'rgba(248,250,252,0.7)'
-    ctx.lineWidth = 1
-    ctx.strokeRect(x0 + 0.5, 0.5, Math.max(1, x1 - x0 - 1), h - 1)
+    // Interior window edges only: a full outline sits under the container's
+    // rounded corners and reads as a second, broken border.
+    if (x1 - x0 < w - 1) {
+      ctx.strokeStyle = 'rgba(248,250,252,0.45)'
+      ctx.lineWidth = 1
+      for (const x of [x0, x1]) {
+        const px = Math.round(x) + 0.5
+        if (px < 1.5 || px > w - 1.5) continue
+        ctx.beginPath()
+        ctx.moveTo(px, 0)
+        ctx.lineTo(px, h)
+        ctx.stroke()
+      }
+    }
 
     if (position != null) {
       const xp = (position / dur) * w

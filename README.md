@@ -71,7 +71,7 @@ to control and nothing to explain.
 
 ## Copying and loading a preset
 
-**copy preset** and **load preset** sit in the panel header. **copy preset** puts
+**copy preset** and **load preset** sit in the page header, next to **load audio**. **copy preset** puts
 the current configuration on the clipboard as JSON:
 
 ```json
