@@ -51,7 +51,6 @@ h1 {
 .transport,
 .bar-tools,
 .loop-toggle,
-.ctl,
 .hint,
 .readout,
 .dialog-actions {
@@ -117,8 +116,6 @@ input[type="number"] {
   padding: 5px 6px;
   font-size: 12px;
 }
-
-input[type="range"] { width: 130px; }
 
 input[type="range"],
 input[type="checkbox"] {
@@ -332,14 +329,12 @@ button.wide { width: 100%; }
   font-size: 13px;
 }
 
-.loop-toggle,
-.ctl {
+.loop-toggle {
   gap: 7px;
   color: var(--dim);
   font-size: 13px;
+  cursor: pointer;
 }
-
-.loop-toggle { cursor: pointer; }
 
 .bar-tools { gap: 10px; }
 
