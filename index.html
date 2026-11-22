@@ -25,7 +25,7 @@
       <section class="timeline" id="timeline" aria-label="Waveform timeline">
         <canvas id="wave"></canvas>
         <canvas id="playhead"></canvas>
-        <div class="loading" id="loading"><span id="loadingText">decoding…</span></div>
+        <div class="loading" id="loading" role="status"><span id="loadingText">decoding…</span></div>
       </section>
       <div class="overview" id="overview" aria-label="Overview minimap">
         <canvas id="minimap"></canvas>
@@ -33,10 +33,10 @@
 
       <section class="transport" id="transport">
         <button id="play" class="primary">▶ Play</button>
-        <button id="restart" title="Back to start">⏮</button>
-        <button id="zoomOut" class="mini" title="Zoom out (−)">−</button>
-        <button id="zoomIn" class="mini" title="Zoom in (+)">+</button>
-        <button id="zoomFit" class="mini" title="Fit track (0)">fit</button>
+        <button id="restart" title="Back to start" aria-label="Back to start">⏮</button>
+        <button id="zoomOut" class="mini" title="Zoom out (−)" aria-label="Zoom out">−</button>
+        <button id="zoomIn" class="mini" title="Zoom in (+)" aria-label="Zoom in">+</button>
+        <button id="zoomFit" class="mini" title="Fit track (0)" aria-label="Fit the whole track">fit</button>
         <span id="zoomInfo" class="dim zoom-info"></span>
         <div class="readout">
           <span id="barpos"></span>
@@ -64,14 +64,14 @@
             </div>
             <p class="group-note" id="tempoNote">Measured from the file you load.</p>
             <div class="row">
-              <input type="number" id="bpm" class="num-lg" min="40" max="240" step="0.01" title="Effective tempo; measured from the audio when a file loads" />
+              <input type="number" id="bpm" class="num-lg" aria-label="Tempo in BPM" min="40" max="240" step="0.01" title="Effective tempo; measured from the audio when a file loads" />
               <span id="barLenInfo" class="unit">—</span>
             </div>
             <div class="row">
               <button class="mini" id="bpmD2" title="Halve the tempo (half-time reading)">÷2</button>
               <button class="mini" id="bpmX2" title="Double the tempo (double-time reading)">×2</button>
               <span class="unit" id="tempoAltLabel" hidden>or</span>
-              <select id="tempoCandidates" class="tempo-alt" title="Tempo alternatives measured from this track" hidden></select>
+              <select id="tempoCandidates" class="tempo-alt" aria-label="Other measured tempos" title="Tempo alternatives measured from this track" hidden></select>
             </div>
           </section>
 
@@ -136,7 +136,7 @@
           press play to hear the loop · drag its handles to set the region (ctrl/alt = free, no snap) · click/drag elsewhere to seek · wheel zoom · shift+wheel pan · shift-drag pan · [ ] shift bar 0 by a beat · +/−/0 zoom · space = play/pause · home = start · white bar = main playback, amber = fade tail · drop an audio file to replace the track
         </span>
         <span id="firstRun">drop an audio file anywhere — it is decoded locally and never uploaded</span>
-        <span id="status" class="status"></span>
+        <span id="status" class="status" role="status"></span>
       </footer>
     </main>
 
@@ -148,7 +148,7 @@
           BPM, bar offset and loop envelope; the audio file itself is not part
           of the preset.
         </p>
-        <textarea id="presetText" rows="12" spellcheck="false" autocomplete="off" placeholder='{"format": "web-loop/preset", ...}'></textarea>
+        <textarea id="presetText" rows="12" aria-label="Preset JSON" spellcheck="false" autocomplete="off" placeholder='{"format": "web-loop/preset", ...}'></textarea>
         <p id="presetError" class="preset-error" role="alert"></p>
         <div class="dialog-actions">
           <button id="cancelPreset" type="button">Cancel</button>

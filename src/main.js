@@ -21,7 +21,7 @@ const el = {
   gridMs: $('gridMs'), gM2: $('gM2'), gM1: $('gM1'), gP1: $('gP1'), gP2: $('gP2'), g0: $('g0'),
   setGridHere: $('setGridHere'),
   mini: $('minimap'), zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomFit: $('zoomFit'), zoomInfo: $('zoomInfo'),
-  loadAudio: $('loadAudio'), audioFile: $('audioFile'),
+  loadAudio: $('loadAudio'),
   panel: $('panel'), transport: $('transport'), overview: $('overview'), shortcuts: $('shortcuts'), firstRun: $('firstRun'),
   copyPreset: $('copyPreset'), loadPreset: $('loadPreset'),
   presetDialog: $('presetDialog'), presetText: $('presetText'), presetError: $('presetError'),
@@ -89,7 +89,10 @@ const setStatus = (msg, kind = '') => {
   el.status.classList.toggle('error', kind === 'error')
   el.status.classList.toggle('ok', kind === 'ok')
 }
-const setLoading = (on) => el.loading.classList.toggle('hidden', !on)
+const setLoading = (on) => {
+  el.loading.classList.toggle('hidden', !on)
+  el.loading.setAttribute('aria-hidden', String(!on))
+}
 
 function syncGridUi() {
   el.gridMs.value = String(Math.round(gridMs))
@@ -434,6 +437,7 @@ function finishAnalysis() {
   setLoading(false)
   setTimeout(() => el.loading.classList.remove('analyzing'), 200)
   setUiLive(true)
+  setPresetEnabled(true)
   updateMeta()
 }
 
@@ -583,6 +587,10 @@ function updateMeta() {
     el.meta.textContent = `${prefix}${track.duration.toFixed(2)} s · measuring tempo…`
     return
   }
+  if (tempoSource === 'failed') {
+    el.meta.textContent = `${prefix}${track.duration.toFixed(2)} s · tempo not measured`
+    return
+  }
   const first = Math.max(0, gridOriginNow())
   const bars = track.duration > first ? (track.duration - first) / barLenNow() : 0
   el.meta.textContent = `${prefix}${bpm.toFixed(2)} BPM · ${barLenNow().toFixed(3)} s/bar · ${bars.toFixed(2)} bars · ${track.duration.toFixed(2)} s`
@@ -598,6 +606,7 @@ async function loadAudioFile(file) {
   if (!file) return
   const my = ++loadToken
   setStatus('')
+  setPresetEnabled(false)
   stopShimmer()
   setControlsLive(false)
   el.overview.classList.add('is-busy')
@@ -651,7 +660,6 @@ async function loadAudioFile(file) {
     // up and the controls inert so the app does not look ready to use
     setTempoSource('pending')
     updateMeta()
-    setPresetEnabled(true)
     renderControls()
     redraw(0)
     el.loadingText.textContent = 'measuring tempo…'
@@ -662,6 +670,7 @@ async function loadAudioFile(file) {
     if (my !== loadToken) return
     setStatus(`could not load ${file.name}: ${err.message || err}`, 'error')
     stopShimmer()
+    setPresetEnabled(!!track)
     el.loading.classList.remove('analyzing')
     el.overview.classList.remove('is-busy')
     if (track) {
