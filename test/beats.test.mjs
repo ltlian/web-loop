@@ -4,7 +4,6 @@ import {
   analyze,
   estimateTempo,
   estimateGrid,
-  findOnsetNear,
   onsetEnvelope,
   lowBandEnvelope,
 } from '../src/beats.js'
@@ -128,19 +127,6 @@ test('a syncopated pattern is read at a metrical relative, and the true level is
     Math.abs(r.bpm / 174 - 1) < 0.01 || Math.abs(r.bpm / (174 * 2) - 1) < 0.01 || Math.abs(r.bpm / (174 * 2 / 3) - 1) < 0.01,
     `bpm ${r.bpm.toFixed(2)} is not a metrical relative of 174`,
   )
-})
-
-test('findOnsetNear finds a kick and refuses silence', () => {
-  const ch = groove(128, { bars: 2 })
-  const { env, fps, offset } = onsetEnvelope(ch, SR)
-  const hit = findOnsetNear(env, fps, 0.5, 0.15, { offset })
-  assert.equal(hit.found, true)
-  assert.ok(Math.abs(hit.time - 0.5) < 0.03, `onset at ${hit.time.toFixed(3)}s`)
-
-  const quiet = new Float32Array(SR * 2)
-  const s = onsetEnvelope(quiet, SR)
-  const miss = findOnsetNear(s.env, s.fps, 1, 0.15, { offset: s.offset })
-  assert.equal(miss.found, false)
 })
 
 test('lowBandEnvelope follows the kick', () => {

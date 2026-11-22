@@ -329,8 +329,6 @@ input[type="checkbox"] {
 
 .num { width: 88px; }
 
-button.wide { width: 100%; }
-
 .nudge button { flex: 1 1 0; min-width: 0; }
 .nudge .unit { flex: 0 0 auto; }
 

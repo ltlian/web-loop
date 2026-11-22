@@ -5,7 +5,6 @@ import { bakeLoop } from './loopbake.js'
 import { computePeaks } from './peaks.js'
 import { createFileDrop } from './file-drop.js'
 import { buildPreset, PRESET_FORMAT } from './preset.js'
-import { findOnsetNear } from './beats.js'
 
 const $ = (id) => document.getElementById(id)
 const el = {
@@ -16,7 +15,7 @@ const el = {
   inPre: $('inPre'), inPreVal: $('inPreVal'), inPost: $('inPost'), inPostVal: $('inPostVal'),
   outPre: $('outPre'), outPreVal: $('outPreVal'), outPost: $('outPost'), outPostVal: $('outPostVal'),
   curve: $('curve'), loopInfo: $('loopInfo'),
-  bpm: $('bpm'), barLenInfo: $('barLenInfo'), fitLoop: $('fitLoop'),
+  bpm: $('bpm'), barLenInfo: $('barLenInfo'),
   bpmX2: $('bpmX2'), bpmD2: $('bpmD2'), tempoAlt: $('tempoCandidates'), tempoAltLabel: $('tempoAltLabel'),
   tempoTag: $('tempoTag'), tempoNote: $('tempoNote'),
   gridMs: $('gridMs'), gM2: $('gM2'), gM1: $('gM1'), gP1: $('gP1'), gP2: $('gP2'), g0: $('g0'),
@@ -56,12 +55,6 @@ let loopTouched = false
 let viewTouched = false
 let analysisId = 0
 let beatWorker = null
-// onset envelope of the current track, measured by the worker and reused by
-// fit loop; null until the analysis lands or when it could not run.
-let beatEnv = null
-let beatFps = 0
-let beatOffset = 0
-let beatEnvMean = 0
 let miniDrag = false
 let panStart = null
 const GRID_KEY = 'web-loop.gridOffsetMs'
@@ -380,10 +373,6 @@ function syncTempoMeta() {
       label = 'not measured'
       kind = 'bad'
       note = 'Could not measure this file — type the tempo in, then enable the loop.'
-    } else if (tempoSource === 'fitted') {
-      label = 'fitted'
-      kind = 'auto'
-      note = 'Derived from the loop ends.'
     } else if (tempoSource === 'preset') {
       label = 'preset'
       note = 'From the preset.'
@@ -459,7 +448,6 @@ function ensureBeatWorker() {
 
 /** Measure the track in the background; the result lands in onAnalysis. */
 function startAnalysis(buffer) {
-  beatEnv = null
   tempoCandidates = []
   syncTempoAlt()
   const samples = downmix(buffer)
@@ -481,12 +469,6 @@ function onAnalysis(e) {
     setStatus(`could not measure the tempo: ${data.reason}`, 'error')
     return
   }
-  beatEnv = data.env
-  beatFps = data.fps
-  beatOffset = data.offset
-  let sum = 0
-  for (const v of beatEnv) sum += v
-  beatEnvMean = beatEnv.length ? sum / beatEnv.length : 0
   tempoCandidates = (data.candidates || [])
     .map((c) => c.bpm)
     .filter((v) => Number.isFinite(v) && v >= 40 && v <= 240)
@@ -546,81 +528,6 @@ function syncTempoAlt() {
     el.tempoAlt.append(option)
   }
   el.tempoAlt.value = ''
-}
-
-/** The grid beat nearest to t under the current tempo. */
-function nearestBeat(t, beatLen) {
-  return gridOriginNow() + Math.round((t - gridOriginNow()) / beatLen) * beatLen
-}
-
-/**
- * Onset at the beat nearest a marker. The search is guided by the grid on
- * purpose: a pickup can be louder than the bar line, so the loudest transient
- * in a wide window is the wrong answer even though it looks right.
- */
-function onsetForMarker(t, beatLen) {
-  const pred = nearestBeat(t, beatLen)
-  const floor = beatEnvMean * 0.5
-  const narrow = findOnsetNear(beatEnv, beatFps, pred, 0.03, { offset: beatOffset, floor })
-  if (narrow.found) return { ...narrow, sure: true }
-  const wide = findOnsetNear(beatEnv, beatFps, pred, 0.09, { offset: beatOffset, floor })
-  return wide.found ? { ...wide, sure: false } : { found: false }
-}
-
-/** Fit BPM + grid phase so both loop boundaries sit on measured onsets. */
-function fitLoopToAudio() {
-  if (!track || !sourceBuffer) return
-  if (!loop.enabled) { setStatus('enable Loop region first'); return }
-  if (!beatEnv) { setStatus('tempo analysis is still running — try again in a moment'); return }
-  const startBar = barsAt(loop.start)
-  const endBar = barsAt(loop.end)
-  const nBars = Math.max(1, Math.round(endBar - startBar))
-  const tS = onsetForMarker(loop.start, 60 / bpm)
-  const tE = onsetForMarker(loop.end, 60 / bpm)
-  if (!tS.found || !tE.found) {
-    setStatus('no clear beat near a loop end — nudge the marker and try again', 'error')
-    return
-  }
-  if (!(tE.time > tS.time + nBars * 0.1)) {
-    setStatus('the two loop ends are too close to fit a tempo', 'error')
-    return
-  }
-  const fitted = clamp((240 * nBars) / (tE.time - tS.time), 40, 240)
-  // a two-point fit always hits its endpoints; check the beats in between
-  const beatLen = 60 / fitted
-  const floor = beatEnvMean * 0.5
-  let hits = 0
-  const total = Math.max(0, nBars * 4 - 1)
-  for (let k = 1; k < nBars * 4; k++) {
-    const at = findOnsetNear(beatEnv, beatFps, tS.time + k * beatLen, 0.03, { offset: beatOffset, floor })
-    if (at.found) hits++
-  }
-  const aligned = total ? hits / total : 1
-  bpm = fitted
-  saveBpm()
-  const bl = barLenNow()
-  const k = Math.round(startBar)
-  gridMs = (tS.time - k * bl) * 1000
-  saveGrid()
-  syncGridUi()
-  const g = gridOriginNow()
-  loop.start = clamp(g + k * bl, 0, track.duration)
-  loop.end = clamp(loop.start + nBars * bl, 0, track.duration)
-  view.setBarLen(bl)
-  view.setGrid(g)
-  syncTempoUi()
-  updateZoomInfo()
-  rebake()
-  updateMeta()
-  setTempoSource('fitted')
-  syncTempoAlt()
-  const weak = aligned < 0.5
-  const loose = !tS.sure || !tE.sure
-  const notes = []
-  if (weak) notes.push(`⚠ only ${Math.round(aligned * 100)}% of interior beats line up`)
-  if (loose) notes.push('⚠ weak onset near a loop end')
-  const note = notes.length ? ` · ${notes.join(' · ')}` : ''
-  setStatus(`fitted ${bpm.toFixed(2)} BPM to the loop · ${nBars} bars · ${(loop.end - loop.start).toFixed(3)} s${note}`, weak ? 'error' : 'ok')
 }
 
 function setPresetEnabled(on) {
@@ -978,7 +885,6 @@ el.tempoAlt.addEventListener('change', () => {
   syncTempoAlt()
 })
 
-el.fitLoop.addEventListener('click', fitLoopToAudio)
 
 el.timeline.addEventListener('wheel', (e) => {
   if (!track) return

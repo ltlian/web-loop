@@ -105,13 +105,6 @@ const mean = (a) => {
   return a.length ? s / a.length : 0
 }
 
-function median(a) {
-  if (!a.length) return 0
-  const b = Float32Array.from(a).sort()
-  const m = b.length >> 1
-  return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2
-}
-
 /**
  * Tempo by autocorrelation of the onset envelope, weighted by a log-Gaussian
  * prior around `prior`. Returns the winning tempo and the other local maxima
@@ -234,22 +227,6 @@ export function estimateDownbeat(low, grid) {
   return { index, margin, scores }
 }
 
-/**
- * Strongest onset within `radius` seconds of t, and whether it is convincing
- * against the local floor. Used by fit loop instead of a low-band-only probe.
- */
-export function findOnsetNear(env, fps, t, radius = 0.15, { offset = 0, floor } = {}) {
-  const a = Math.max(0, Math.floor((t - radius - offset) * fps))
-  const b = Math.min(env.length - 1, Math.ceil((t + radius - offset) * fps))
-  if (b <= a) return { time: t, found: false, strength: 0, floor: 0 }
-  let best = -Infinity, bestI = a
-  for (let i = a; i <= b; i++) if (env[i] > best) { best = env[i]; bestI = i }
-  // an absolute floor is stable when the window holds several transients;
-  // the local median is the fallback for callers that have no track reference
-  const gate = floor ?? Math.max(median(env.subarray(a, b + 1)) * 2.5, 1e-9)
-  return { time: bestI / fps + offset, found: best > gate, strength: best, floor: gate }
-}
-
 /** Everything the app needs from one decoded mono channel. */
 export function analyze(samples, sr, opts = {}) {
   const { env, fps, offset } = onsetEnvelope(samples, sr, opts)
@@ -267,13 +244,8 @@ export function analyze(samples, sr, opts = {}) {
     bpm,
     barLen,
     gridOffsetMs,
-    beats: grid.beats,
     candidates,
     confidence: grid.strength,
-    downbeatIndex: downbeat.index,
     downbeatMargin: downbeat.margin,
-    env,
-    fps,
-    offset,
   }
 }
