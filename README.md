@@ -59,8 +59,9 @@ to control and nothing to explain.
   grid offset. A tag beside the tempo says where the number came from —
   `auto`, `set`, `preset`, `measuring` or `not measured` — and when the downbeat
   was a guess it says so. The candidate selector lists the other measured
-  metrical levels, and `×2` / `÷2` correct half and double time. **fit loop to
-  beats** re-aligns the grid and the loop to the beats nearest the two markers.
+  metrical levels, and `×2` / `÷2` correct half and double time. **fit tempo to
+  loop** replaces the BPM and bar 0 with values measured from the loop ends, so
+  a loop you placed by ear becomes the definition of the tempo.
   **Bar lines** shift bar 0 in whole beats (`−2 … +2`, reset) or place it at the
   playhead with **set here**; free placement is `ctrl`/`alt`-drag on a handle.
 - **Playheads**: white for the main position; amber for the post-roll stream and

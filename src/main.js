@@ -380,6 +380,10 @@ function syncTempoMeta() {
       label = 'not measured'
       kind = 'bad'
       note = 'Could not measure this file — type the tempo in, then enable the loop.'
+    } else if (tempoSource === 'fitted') {
+      label = 'fitted'
+      kind = 'auto'
+      note = 'Derived from the loop ends.'
     } else if (tempoSource === 'preset') {
       label = 'preset'
       note = 'From the preset.'
@@ -608,7 +612,7 @@ function fitLoopToAudio() {
   updateZoomInfo()
   rebake()
   updateMeta()
-  setTempoSource('manual')
+  setTempoSource('fitted')
   syncTempoAlt()
   const weak = aligned < 0.5
   const loose = !tS.sure || !tE.sure
@@ -616,7 +620,7 @@ function fitLoopToAudio() {
   if (weak) notes.push(`⚠ only ${Math.round(aligned * 100)}% of interior beats line up`)
   if (loose) notes.push('⚠ weak onset near a loop end')
   const note = notes.length ? ` · ${notes.join(' · ')}` : ''
-  setStatus(`fitted ${bpm.toFixed(2)} BPM · ${nBars} bars · ${(loop.end - loop.start).toFixed(3)} s${note}`, weak ? 'error' : 'ok')
+  setStatus(`fitted ${bpm.toFixed(2)} BPM to the loop · ${nBars} bars · ${(loop.end - loop.start).toFixed(3)} s${note}`, weak ? 'error' : 'ok')
 }
 
 function setPresetEnabled(on) {
